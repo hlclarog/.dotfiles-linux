@@ -1,31 +1,45 @@
 #!/usr/bin/env bash
-# Link the Windows projects folder into $HOME when running under WSL.
+# Link the Windows projects folder into $HOME as ~/Win when running under WSL.
 #
-# The link is an indirection layer on purpose: every navigation alias points at
-# ~/Projects, so moving the real folder later — for instance into the WSL
-# filesystem, where 9p no longer slows git and file watchers down — only needs
-# this one link repointed.
+# ~/Projects is deliberately NOT this link: it is a real ext4 directory holding
+# the repositories being worked on, because /mnt is a 9p mount where git and
+# builds are two orders of magnitude slower and inotify does not fire at all, so
+# no watch-based dev server sees a change. ~/Win is the same tree on the Windows
+# drive, kept for the projects that have not been migrated yet.
 #
 # Sourced by `dot self install`, so it uses return instead of exit.
 
-WSL_PROJECTS="/mnt/d/Projects"
-LINK="$HOME/Projects"
+WIN_PROJECTS="/mnt/d/Projects"
+LINK="$HOME/Win"
 
-if [ ! -d "$WSL_PROJECTS" ]; then
-	return 0
-fi
+grep -qi microsoft /proc/version 2>/dev/null || return 0
+[ -d "$WIN_PROJECTS" ] || return 0
+
+# Migration from the two earlier layouts: this link first lived at ~/Projects,
+# then at the lowercase ~/win. Only ever removes a symlink aimed at the same
+# target, never a real directory. ext4 is case sensitive, so ~/win and ~/Win are
+# genuinely different paths.
+for stale in "$HOME/Projects" "$HOME/win"; do
+	if [ -L "$stale" ] && [ "$(readlink "$stale")" = "$WIN_PROJECTS" ]; then
+		rm -f "$stale"
+		echo " > Removed the old $stale link; it now lives at $LINK"
+	fi
+done
 
 if [ -L "$LINK" ]; then
 	current="$(readlink "$LINK")"
-	if [ "$current" = "$WSL_PROJECTS" ]; then
-		return 0
+	if [ "$current" != "$WIN_PROJECTS" ]; then
+		echo " > Repointing $LINK: $current -> $WIN_PROJECTS"
+		rm -f "$LINK"
+		ln -s "$WIN_PROJECTS" "$LINK"
 	fi
-	echo " > Repointing $LINK: $current -> $WSL_PROJECTS"
-	rm -f "$LINK"
 elif [ -e "$LINK" ]; then
 	echo " > $LINK already exists and is not a symlink, leaving it alone"
-	return 0
+else
+	ln -s "$WIN_PROJECTS" "$LINK"
+	echo " > Linked $LINK -> $WIN_PROJECTS"
 fi
 
-ln -s "$WSL_PROJECTS" "$LINK"
-echo " > Linked $LINK -> $WSL_PROJECTS"
+# The ext4 side is created empty, mirroring the Windows layout so the same
+# navigation aliases work on both. Repositories get cloned in one at a time.
+mkdir -p "$HOME/Projects/code" "$HOME/Projects/work"
