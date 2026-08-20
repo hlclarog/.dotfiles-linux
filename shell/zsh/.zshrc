@@ -94,6 +94,14 @@ source_if_exists "$DOTFILES_PATH/shell/zsh/key-bindings.zsh"
 export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
 command -v carapace >/dev/null 2>&1 && source <(carapace _carapace)
 
+# fnm owns node; there is deliberately no node installed through brew, so that
+# `brew upgrade` can never move a major version under a project's feet.
+#
+# --use-on-cd switches version on every cd, and the recursive strategy also
+# picks up a .nvmrc or .node-version sitting in a parent directory.
+command -v fnm >/dev/null 2>&1 &&
+	eval "$(fnm env --use-on-cd --version-file-strategy=recursive --shell zsh)"
+
 command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"
 command -v zoxide >/dev/null 2>&1 && eval "$(zoxide init zsh)"
 command -v atuin >/dev/null 2>&1 && eval "$(atuin init zsh)"
