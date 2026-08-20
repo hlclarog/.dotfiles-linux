@@ -1,3 +1,11 @@
 # Applies only to repositories under /mnt, via the includeIf in git/config.
 [core]
+	# These repositories were checked out by Windows git, which defaults to
+	# autocrlf=true and leaves CRLF in the working tree.
 	autocrlf = true
+
+	# The Windows drives are mounted with fmask=11, so every file reads as 744.
+	# The execute bit has to stay on: without it nothing on those drives can
+	# run, including the VS Code WSL extension's wslServer.sh. Ignoring the bit
+	# here is what keeps git from reporting all of them as mode 100755.
+	fileMode = false
