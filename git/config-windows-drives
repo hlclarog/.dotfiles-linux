@@ -1,0 +1,3 @@
+# Applies only to repositories under /mnt, via the includeIf in git/config.
+[core]
+	autocrlf = true

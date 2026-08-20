@@ -1,0 +1,17 @@
+[user]
+	name = hlclarog
+	email = hlclarog@gmail.com
+
+[init]
+	defaultBranch = main
+
+# Repositories on the Windows drives were checked out by Windows git, which
+# defaults to core.autocrlf=true and so leaves CRLF in the working tree. Git on
+# the Linux side defaults to false, reads those CRLF files against LF blobs, and
+# reports every line of every file as modified.
+#
+# The override is scoped by path on purpose. Setting autocrlf globally would
+# also write CRLF into repositories inside the WSL filesystem, and a shell
+# script whose shebang ends in \r fails with "bad interpreter".
+[includeIf "gitdir:/mnt/"]
+	path = ~/.dotfiles/git/config-windows-drives
