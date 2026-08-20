@@ -45,6 +45,20 @@ ZSH_AUTOSUGGEST_USE_ASYNC=true
 ZSH_HIGHLIGHT_MAXLENGTH=300
 ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets)
 
+# zsh-autocomplete tuning. These have to be set before the plugin is sourced.
+#
+# list-lines caps how much of the screen the live list may claim. Left
+# unbounded it takes roughly half the terminal, and because this prompt is
+# multi-line the plugin miscounts the reserved rows and scrolls the prompt off
+# the top of the screen.
+zstyle ':autocomplete:*' list-lines 4
+zstyle ':autocomplete:*' min-input 2
+
+# The plugin writes its recent-directories history here but does not create the
+# directory, which makes every cd print a chpwd_recent_filehandler error.
+[[ -d ${XDG_DATA_HOME:-$HOME/.local/share}/zsh ]] ||
+	mkdir -p ${XDG_DATA_HOME:-$HOME/.local/share}/zsh
+
 if [[ -n $BREW_BIN ]]; then
 	BREW_SHARE="$(dirname $BREW_BIN)/share"
 	source_if_exists "$BREW_SHARE/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
@@ -78,7 +92,6 @@ source_if_exists "$DOTFILES_PATH/shell/zsh/key-bindings.zsh"
 # Tooling
 # ------------------------------------------------------------------------------
 export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
-zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 command -v carapace >/dev/null 2>&1 && source <(carapace _carapace)
 
 command -v fzf >/dev/null 2>&1 && eval "$(fzf --zsh)"

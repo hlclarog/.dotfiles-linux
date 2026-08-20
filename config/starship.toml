@@ -17,7 +17,7 @@ $time\
 \n$character\
 """
 
-add_newline = true
+add_newline = false
 command_timeout = 3600000
 palette = "gentleman"
 
