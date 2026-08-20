@@ -1,0 +1,56 @@
+# Directory skeleton for ~/Projects, created by
+# restoration_scripts/05-projects-skeleton.sh
+#
+# One path per line, relative to ~/Projects. Blank lines and # comments are
+# ignored. Parent directories are created automatically.
+#
+# This is DECLARED rather than derived from ~/Win on purpose: the Windows folder
+# disappears once migration finishes, and does not exist at all on a fresh
+# machine, so deriving it would rebuild nothing exactly when it matters.
+#
+# NAMING: <project>-<layer>. The project is repeated even though the parent
+# directory already carries it, because JetBrains IDEs show the bare folder name
+# in their recent-projects list, where "backend" alone would be unreadable
+# across fifteen entries. The older "-review-pr-" infix was dropped: these
+# checkouts are used for development, not just for reviewing pull requests, and
+# for an actual PR review `git worktree add` beats a second clone since it
+# shares one .git instead of duplicating the history.
+#
+# Several local names do not match their repository name, so always clone with
+# an explicit destination.
+#
+# To refresh this list from the current state:
+#   cd ~/Projects && find . -mindepth 1 -type d -not -path '*/.git*' \
+#     -not -path '*/node_modules*' | sed 's|^\./||' | sort
+
+# --- code ---------------------------------------------------------------
+code/crm
+code/prism
+code/prism-rules
+code/n8n
+code/presentacion-sistema-cognitivo
+
+# --- work / soft-g-net --------------------------------------------------
+work/soft-g-net/inventario/inventario-backend
+work/soft-g-net/inventario/inventario-frontend
+work/soft-g-net/rh/rh-backend
+work/soft-g-net/rh/rh-frontend
+
+# --- work / ta-* --------------------------------------------------------
+work/ta-portal/ta-portal-backend
+work/ta-portal/ta-portal-frontend
+work/ta-incident/ta-incident-backend
+work/ta-incident/ta-incident-frontend
+work/ta-lsf-scheduler/ta-scheduler-backend
+work/ta-lsf-scheduler/ta-scheduler-frontend
+work/ta-lsf-scheduler/ta-scheduler-reports
+work/ta-web-site
+
+# --- work / trip2-cms ---------------------------------------------------
+work/trip2-cms/trip2-cms-backend
+work/trip2-cms/trip2-cms-frontend
+work/trip2-cms/trip2-cms-reports
+work/trip2-cms/trip2-cms-2020-frontend
+work/trip2-cms/movil/trip2-ondemand-movil
+work/trip2-cms/movil/trip2-nemt-movil
+work/trip2-cms/movil/background-location

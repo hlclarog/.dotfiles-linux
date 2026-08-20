@@ -62,10 +62,10 @@ alias up='dot package update_all'
 # ------------------------------------------------------------------------------
 # Projects
 # ------------------------------------------------------------------------------
-alias cdp='cd $HOME/Projects'
+alias cdp='cd $HOME/Projects && la'
 alias cdc='cd $HOME/Projects/code && la'
-alias cdw='cd $HOME/Projects/work'
-alias cdwin='cd $HOME/Win'
+alias cdw='cd $HOME/Projects/work && la'
+alias cdwin='cd $HOME/Win && la'
 
 # ------------------------------------------------------------------------------
 # Utils

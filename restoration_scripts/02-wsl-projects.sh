@@ -40,6 +40,5 @@ else
 	echo " > Linked $LINK -> $WIN_PROJECTS"
 fi
 
-# The ext4 side is created empty, mirroring the Windows layout so the same
-# navigation aliases work on both. Repositories get cloned in one at a time.
-mkdir -p "$HOME/Projects/code" "$HOME/Projects/work"
+# The ext4 ~/Projects skeleton is owned by 05-projects-skeleton.sh, which reads
+# it from os/linux/projects-skeleton.txt. Nothing to do here.
