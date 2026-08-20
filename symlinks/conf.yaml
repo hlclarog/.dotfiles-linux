@@ -16,5 +16,6 @@
     ~/.zshrc: shell/zsh/.zshrc
     ~/.inputrc: shell/.inputrc
     ~/.gitconfig: git/config
+    ~/.claude/statusline-command.sh: tools/claude-code/statusline-command.sh
     ~/.config/starship.toml: config/starship.toml
     ~/.config/herdr/config.toml: config/herdr/config.toml
