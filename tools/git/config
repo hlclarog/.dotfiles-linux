@@ -1,34 +1,19 @@
-#github
+# Reference copy of ~/.ssh/config.
+#
+# The SSH user for GitHub and Bitbucket is always "git" — never the account
+# name. Setting User to the account name fails on `ssh -T <host>` and on any
+# remote URL written without the git@ prefix.
+
 Host github.com
   HostName github.com
-  User hlclarog
+  User git
   IdentityFile ~/.ssh/github-hlclarog
   IdentitiesOnly yes
+  AddKeysToAgent yes
 
-#bitbucket
-Host bitbucket.org-bitbucket_hclaro
+Host bitbucket.org
   HostName bitbucket.org
-  User hclaro
+  User git
   IdentityFile ~/.ssh/bit-hclaro
   IdentitiesOnly yes
-
-#bitbucket_username2 account
-Host bitbucket.org-bitbucket_username2
-  HostName bitbucket.org
-  User git
-  IdentityFile ~/.ssh/{ssh-key-bitbucket_username2}
-  IdentitiesOnly yes
-
-Host bitbucket-personal
-  HostName bitbucket.org
-  User git
-  IdentityFile ~/.ssh/id_rsa_personal
-  IdentitiesOnly yes
-
-Host myserver
-  HostName ssh.username.com
-  Port 1111
-  IdentityFile ~/.ssh/id_rsa_personal
-  IdentitiesOnly yes
-  User username
-  IdentitiesOnly yes
+  AddKeysToAgent yes

@@ -1,4 +1,4 @@
-export DOTFILES_PATH="/home/hlclarog/.dotfiles"
+export DOTFILES_PATH="$HOME/.dotfiles"
 export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 export DOTLY_THEME="codely"
 
@@ -48,3 +48,14 @@ if [ -n "$(ls -A "$DOTFILES_PATH/shell/bash/completions/")" ]; then
     source "$bash_file"
   done
 fi
+
+# Homebrew
+for brew_bin in /home/linuxbrew/.linuxbrew/bin /opt/homebrew/bin /usr/local/bin; do
+  if [ -x "$brew_bin/brew" ]; then
+    eval "$("$brew_bin/brew" shellenv)"
+    break
+  fi
+done
+
+# rustup
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
