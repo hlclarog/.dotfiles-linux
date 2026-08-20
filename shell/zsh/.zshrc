@@ -47,10 +47,12 @@ ZSH_HIGHLIGHT_HIGHLIGHTERS=(main brackets)
 
 if [[ -n $BREW_BIN ]]; then
 	BREW_SHARE="$(dirname $BREW_BIN)/share"
+	source_if_exists "$BREW_SHARE/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
 	source_if_exists "$BREW_SHARE/zsh-autosuggestions/zsh-autosuggestions.zsh"
 fi
 
 # Native package layouts, for machines without brew
+source_if_exists "/usr/share/zsh/plugins/zsh-autocomplete/zsh-autocomplete.plugin.zsh"
 source_if_exists "/usr/share/zsh/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh"
 source_if_exists "/usr/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
 
