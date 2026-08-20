@@ -7,6 +7,7 @@ alias sudo='sudo '
 alias ..="cd .."
 alias ...="cd ../.."
 alias cls='clear'
+alias ~="cd ~"
 alias dotfiles='cd $DOTFILES_PATH'
 
 # ------------------------------------------------------------------------------
@@ -85,3 +86,8 @@ fi
 # SSH
 # ------------------------------------------------------------------------------
 alias ssh-start='. $DOTFILES_PATH/tools/git/ssh-start-agent.sh'
+
+# VS Code, reachable through Windows interop under WSL
+if command -v code >/dev/null 2>&1; then
+	alias c.='(code $PWD &>/dev/null &)'
+fi
