@@ -1,0 +1,7 @@
+build-essential
+curl
+file
+git
+python-is-python3
+unzip
+zsh
