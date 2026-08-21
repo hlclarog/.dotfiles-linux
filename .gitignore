@@ -1,0 +1,7 @@
+# Neovim downloads spell dictionaries into the config directory it is
+# symlinked to. They are 24 MB of regenerable data, not configuration.
+config/nvim/spell/
+
+# Written by Neovim/LazyVim at runtime inside the linked config.
+config/nvim/.luarc.json
+

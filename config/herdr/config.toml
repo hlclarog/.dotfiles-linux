@@ -1,29 +1,72 @@
-onboarding = false
 # herdr configuration managed by Gentleman.Dots.
-# This file is copied into ~/.config/herdr/config.toml during installation.
+# Symlinked to ~/.config/herdr/config.toml. herdr writes its own preference
+# changes back into this file, so expect it to appear modified after tweaking
+# things in the UI.
+#
+# Editing this file changes nothing on its own. herdr is a background server
+# that reads the config when it starts, so a new pane or client attaches to a
+# server still holding the old values. Apply changes without losing sessions:
+#
+#     herdr server reload-config
+onboarding = false
 
 [theme]
-# Use a built-in dark theme with neutral foregrounds so Herdr does not inherit
-# Ghostty bright-black selected rows or Kanagawa's warm/yellow label text.
 name = "vesper"
-
 auto_switch = false
+
+# Every colour below is checked against panel_bg with the WCAG contrast ratio:
+# 4.5:1 for text, 3:1 for borders and separators. The base theme's own greys sat
+# under those thresholds, which is what made secondary text hard to read on this
+# near-black background.
+#
+# Note the token names follow Catppuccin (text / subtext0 / overlay / surface),
+# because that is herdr's default theme. The full set accepted here is larger
+# than the documentation page lists: accent, panel_bg, sidebar_bg,
+# active_row_bg, selection_bg, surface0, surface1, surface_dim, overlay0,
+# overlay1, text, subtext0, mauve, green, yellow, red, blue, teal, peach.
 [theme.custom]
+# --- backgrounds, darkest to lightest -----------------------------------
 panel_bg = "#06080f"
-# Match Pi's Gentle theme, with a muted cyan for Herdr chrome.
-accent = "#6FA0AF"
-green = "#B7CC85"
-blue = "#6FA0AF"
-red = "#CB7C94"
-yellow = "#DEBA87"
+sidebar_bg = "#080A12"
+surface_dim = "#0D1018"
+surface0 = "#141822"
+surface1 = "#1C212E"
+active_row_bg = "#1C212E"
+selection_bg = "#27304A"
+
+# --- foregrounds, with their ratio against panel_bg ---------------------
+text = "#F3F6F9"     # 18.45:1  primary text
+subtext0 = "#A8AEC0" #  9.03:1  secondary text
+overlay1 = "#8A8FA3" #  6.23:1  inactive labels
+overlay0 = "#6B7085" #  4.08:1  borders and separators
+
+# --- accents, matching Pi's Gentle theme with a muted cyan for chrome ---
+accent = "#6FA0AF"   #  6.98:1
+blue = "#6FA0AF"     #  6.98:1
+green = "#B7CC85"    # 11.43:1
+red = "#CB7C94"      #  6.53:1
+yellow = "#DEBA87"   # 10.94:1
 
 [ui]
 accent = "#6FA0AF"
-
 agent_panel_sort = "spaces"
 show_agent_labels_on_pane_borders = true
+
+status_indicators = "symbols"
+[ui.toast]
+# "herdr" draws the toast inside the TUI, so nothing reaches you once another
+# Windows app is in front. "terminal" emits OSC 9 and lets Windows Terminal
+# raise a real Windows toast instead. "system" cannot work here: it shells out
+# to notify-send, which is not installed and has no notification daemon to
+# talk to on the session bus.
+delivery = "herdr"
+
 [keys]
 # Match tmux/Zellij-style prefix muscle memory.
+#
+# Trade-off: ctrl+a is zsh's beginning-of-line in emacs mode, which is lost
+# inside herdr panes. Use Home instead, or set this back to herdr's own default
+# of ctrl+b.
 prefix = "ctrl+a"
 
 # Move between agents in the sidebar.
@@ -35,6 +78,3 @@ next_agent = "prefix+alt+j"
 # Use Ctrl after the prefix: Alt+number is owned by skhd/yabai spaces,
 # and Shift+number did not reach Herdr reliably in the current terminal setup.
 focus_agent = "prefix+ctrl+1..9"
-
-[ui.toast]
-delivery = "system"

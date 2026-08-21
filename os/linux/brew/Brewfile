@@ -1,3 +1,5 @@
+tap "anomalyco/tap"
+tap "openai/tools"
 tap "gentleman-programming/tap", "https://github.com/Gentleman-Programming/homebrew-tap"
 tap "denisidoro/tools"
 # Improved shell history for zsh, bash, fish and nushell
@@ -44,3 +46,23 @@ brew "zsh-syntax-highlighting"
 brew "gentleman-programming/tap/gentleman-dots", trusted: true
 # Ultra-fast parser for declarative command-line options, required by dotly
 brew "denisidoro/tools/docpars"
+# Lightweight and flexible command-line JSON processor
+# Required by the Claude Code statusline and restoration script 06.
+brew "jq"
+# Persistent memory for AI coding agents
+brew "gentleman-programming/tap/engram"
+# Agent orchestration: SDD, judgment-day, review contracts
+brew "gentleman-programming/tap/gentle-ai"
+# Gentleman git assistant
+brew "gentleman-programming/tap/gga"
+# opencode AI coding agent
+brew "anomalyco/tap/opencode"
+
+# The AI CLIs. These are casks, which `brew bundle dump --brews`
+# silently omits - that omission is why a restore came up without them.
+# Claude Code CLI
+cask "claude-code"
+# OpenAI Codex CLI
+cask "codex"
+# OpenAI CLI
+cask "openai"

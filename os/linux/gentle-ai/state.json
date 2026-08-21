@@ -1,0 +1,218 @@
+{
+  "installed_agents": [
+    "claude-code",
+    "opencode",
+    "codex"
+  ],
+  "installed_binary_version": "2.4.0",
+  "managed_asset_digest": "sha256:0261e5e2d143528013b54aa1e928e235bff7aaaf1265db566d6b67418eac1a80",
+  "selection_configured": true,
+  "components": [
+    "engram",
+    "sdd",
+    "skills",
+    "context7",
+    "permissions",
+    "gga",
+    "claude-theme",
+    "opencode-gentle-logo",
+    "persona"
+  ],
+  "preset": "full-gentleman",
+  "sdd_mode": "multi",
+  "strict_tdd": true,
+  "community_tools_configured": true,
+  "claude_phase_assignments": {
+    "default": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "jd-fix-agent": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "jd-judge-a": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "jd-judge-b": {
+      "model": "fable",
+      "effort": "max"
+    },
+    "sdd-apply": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "sdd-archive": {
+      "model": "sonnet",
+      "effort": "max"
+    },
+    "sdd-design": {
+      "model": "fable",
+      "effort": "max"
+    },
+    "sdd-explore": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "sdd-onboard": {
+      "model": "sonnet",
+      "effort": "max"
+    },
+    "sdd-propose": {
+      "model": "fable",
+      "effort": "max"
+    },
+    "sdd-spec": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "sdd-tasks": {
+      "model": "opus",
+      "effort": "max"
+    },
+    "sdd-verify": {
+      "model": "opus",
+      "effort": "max"
+    }
+  },
+  "codexModelAssignments": {
+    "default": "xhigh",
+    "jd-fix-agent": "xhigh",
+    "jd-judge-a": "xhigh",
+    "jd-judge-b": "xhigh",
+    "sdd-apply": "xhigh",
+    "sdd-archive": "xhigh",
+    "sdd-design": "xhigh",
+    "sdd-explore": "xhigh",
+    "sdd-onboard": "xhigh",
+    "sdd-propose": "xhigh",
+    "sdd-spec": "xhigh",
+    "sdd-tasks": "xhigh",
+    "sdd-verify": "xhigh"
+  },
+  "codexCarrilModelAssignments": {
+    "sdd-cheap": "gpt-5.6-luna",
+    "sdd-mid": "gpt-5.6-terra",
+    "sdd-strong": "gpt-5.6-sol"
+  },
+  "codexPhaseModelAssignments": {
+    "default": "gpt-5.6-sol",
+    "jd-fix-agent": "gpt-5.6-sol",
+    "jd-judge-a": "gpt-5.6-terra",
+    "jd-judge-b": "gpt-5.6-sol",
+    "sdd-apply": "gpt-5.6-luna",
+    "sdd-archive": "gpt-5.6-luna",
+    "sdd-design": "gpt-5.6-sol",
+    "sdd-explore": "gpt-5.6-luna",
+    "sdd-onboard": "gpt-5.6-luna",
+    "sdd-propose": "gpt-5.6-sol",
+    "sdd-spec": "gpt-5.6-luna",
+    "sdd-tasks": "gpt-5.6-luna",
+    "sdd-verify": "gpt-5.6-sol"
+  },
+  "model_assignments": {
+    "gentle-orchestrator": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "low"
+    },
+    "jd-fix-agent": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "xhigh"
+    },
+    "jd-judge-a": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-terra",
+      "effort": "xhigh"
+    },
+    "jd-judge-b": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "xhigh"
+    },
+    "review-readability": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "review-refuter": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "review-reliability": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "review-resilience": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "review-risk": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "review-validator": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-apply": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-archive": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-design": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "xhigh"
+    },
+    "sdd-explore": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-init": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "xhigh"
+    },
+    "sdd-onboard": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-propose": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "xhigh"
+    },
+    "sdd-spec": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-tasks": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-luna",
+      "effort": "xhigh"
+    },
+    "sdd-verify": {
+      "provider_id": "openai",
+      "model_id": "gpt-5.6-sol",
+      "effort": "xhigh"
+    }
+  },
+  "persona": "neutral",
+  "last_update_check": "2026-08-20T22:17:32.111298573-05:00"
+}

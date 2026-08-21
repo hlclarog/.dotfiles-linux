@@ -1,0 +1,13 @@
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/github-hlclarog
+  IdentitiesOnly yes
+  AddKeysToAgent yes
+
+Host bitbucket.org
+  HostName bitbucket.org
+  User git
+  IdentityFile ~/.ssh/bit-hclaro
+  IdentitiesOnly yes
+  AddKeysToAgent yes
