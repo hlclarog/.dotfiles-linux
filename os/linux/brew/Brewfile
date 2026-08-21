@@ -66,3 +66,9 @@ cask "claude-code"
 cask "codex"
 # OpenAI CLI
 cask "openai"
+
+# Runtime libraries that nothing else in this file depends on, kept declared
+# so `brew bundle dump` round-trips cleanly instead of re-adding them every
+# time. alsa-lib backs herdr notification sounds; nss backs headless Chrome.
+brew "alsa-lib"
+brew "nss"
