@@ -1,0 +1,20 @@
+# Windows-side WSL2 settings. Lives at %USERPROFILE%\.wslconfig, NOT inside the
+# distribution — installed by restoration_scripts/09-wslconfig.sh.
+#
+# networkingMode = mirrored makes WSL share the Windows network interfaces
+# instead of sitting behind NAT. Without it eth0 gets a private 172.x address
+# that nothing else on the LAN can reach, which breaks any inbound connection:
+# SSH from a phone or tablet, Moshi, Mosh, and exposing a dev server to another
+# device. With it, the distribution answers on the machine's real LAN address.
+#
+# NOTE: `netsh portproxy` is NOT an alternative. It forwards TCP only, and Mosh
+# needs UDP 60000-61000. Mirrored networking is the only route that carries both.
+#
+# firewall = true keeps the Windows firewall applied to WSL traffic. Inbound is
+# still blocked by default at the Hyper-V layer, so specific rules are required
+# on top of this — see restoration_scripts/10-moshi-remote.sh.
+#
+# Requires Windows 11 22H2 or newer. Changes need `wsl --shutdown` to take hold.
+[wsl2]
+networkingMode=mirrored
+firewall=true

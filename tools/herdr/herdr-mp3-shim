@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# Bridge for herdr's notification sounds and visual alerts under WSL2.
+#
+# herdr is installed as `paplay` (see symlinks/conf.yaml) because that is the
+# first name it probes for on this platform. It works around two separate
+# defects, both verified on Windows 11 + Windows Terminal:
+#
+# 1. SOUND. herdr writes its notification mp3 to a Linux temp path and hands
+#    that path verbatim to the player. A Windows player cannot open /tmp/...,
+#    so playback fails and herdr logs nothing about it — the notification just
+#    goes silent. wslpath converts the path to the \\wsl.localhost\<distro>\...
+#    form that PowerShell can open. Never hardcode the distro name; this box is
+#    called "gentleman", not "Ubuntu".
+#
+# 2. VISUALS. herdr's delivery = "terminal" emits OSC 9, but Windows Terminal
+#    does not render OSC 9 desktop notifications. Verified by writing the escape
+#    sequence straight to the outer pty, bypassing herdr entirely: nothing
+#    appeared, in both the BEL and ST terminator forms. So the toast is raised
+#    here instead, through NotifyIcon, on the same PowerShell call as the audio.
+#
+# WSL has no usable audio device of its own for this (/dev/snd holds only
+# `timer`, and no pulseaudio/pipewire is installed), so routing playback through
+# Windows avoids wiring up WSLg's PulseServer entirely.
+#
+# CAUTION: do NOT put `powershell` or `powershell.exe` on PATH. herdr probes for
+# them BEFORE the Linux player names and prefers them, and its own PowerShell
+# path handling is the broken one — the sound goes silent again. Call PowerShell
+# by absolute path, as this script does.
+#
+# herdr passes only the audio file, never the notification title or body, so the
+# visual alert text is generic by necessity.
+
+LOG="$HOME/.local/state/herdr-sound.log"
+mkdir -p "$(dirname "$LOG")"
+printf '%s | called as %s | argv: %s\n' "$(date '+%F %T')" "${0##*/}" "$*" >> "$LOG"
+
+# The file is the last argument that exists on disk.
+file=""
+for arg in "$@"; do
+	[ -f "$arg" ] && file="$arg"
+done
+
+if [ -z "$file" ]; then
+	echo "$(date '+%F %T') | no playable file in argv" >> "$LOG"
+	exit 1
+fi
+
+win_path=$(wslpath -w "$file" 2>/dev/null)
+if [ -z "$win_path" ]; then
+	echo "$(date '+%F %T') | wslpath failed for $file" >> "$LOG"
+	exit 1
+fi
+
+echo "$(date '+%F %T') | playing $win_path + toast" >> "$LOG"
+
+PS=/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe
+[ -x "$PS" ] || { echo "$(date '+%F %T') | no powershell at $PS" >> "$LOG"; exit 1; }
+
+# presentationCore for MediaPlayer, which handles mp3. System.Media.SoundPlayer
+# would NOT work here: it is WAV-only.
+"$PS" -NoProfile -WindowStyle Hidden -Command "
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  Add-Type -AssemblyName presentationCore
+
+  \$n = New-Object System.Windows.Forms.NotifyIcon
+  \$n.Icon = [System.Drawing.SystemIcons]::Information
+  \$n.Visible = \$true
+  \$n.ShowBalloonTip(6000, 'Claude Code', 'El agente terminó', [System.Windows.Forms.ToolTipIcon]::Info)
+
+  \$p = New-Object System.Windows.Media.MediaPlayer
+  \$p.Open([uri]'$win_path')
+  Start-Sleep -Milliseconds 300
+  \$p.Play()
+  Start-Sleep -Seconds 4
+  \$p.Close()
+  \$n.Dispose()
+" >> "$LOG" 2>&1
+
+echo "$(date '+%F %T') | powershell exit=$?" >> "$LOG"

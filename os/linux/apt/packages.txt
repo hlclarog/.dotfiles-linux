@@ -2,6 +2,7 @@ build-essential
 curl
 file
 git
+openssh-server
 python-is-python3
 unzip
 zsh

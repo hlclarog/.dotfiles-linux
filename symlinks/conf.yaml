@@ -22,3 +22,7 @@
     ~/.config/nvim: config/nvim
     ~/.config/atuin/config.toml: config/atuin/config.toml
     ~/.ssh/config: ssh/config
+    # herdr looks for `paplay` first among the Linux player names, so the shim
+    # is installed under that name. Both links point at the same script.
+    ~/.local/bin/herdr-mp3-shim: tools/herdr/herdr-mp3-shim
+    ~/.local/bin/paplay: tools/herdr/herdr-mp3-shim
