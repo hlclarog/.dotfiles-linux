@@ -67,9 +67,10 @@ export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 `package import` runs `brew bundle install`, so it also brings the taps and the
 three casks: Claude Code, Codex and the OpenAI CLI.
 
-`self install` creates the 12 symlinks and runs the restoration scripts: the
+`self install` creates the 14 symlinks and runs the restoration scripts: the
 Windows drive link, `/etc/wsl.conf`, the projects skeleton, the Claude Code
-statusline, the gentle-ai selections and the Node pin.
+statusline, the gentle-ai selections, the Node pin, the Windows-side
+`.wslconfig` (script 09) and Moshi remote access (script 10).
 
 ## 7. Apply `/etc/wsl.conf`
 
@@ -98,6 +99,68 @@ are generated output, not configuration.
 
 ---
 
+## 9. Remote access from a phone or tablet (Moshi)
+
+Moshi drives this machine's agents from a mobile device: approvals, push
+notifications and a terminal over SSH/Mosh. Restoration script 10 automates what
+it can and *prints* whatever needs elevation or a human.
+
+Two pairing layers exist and confusing them costs hours. They are independent:
+
+| Layer | What it does | Command |
+|---|---|---|
+| Host ↔ account | Claims the machine for **one** device | `moshi-hook pair --token …` |
+| SSH key | Appends an ED25519 key to `authorized_keys` | `moshi-hook host setup` (QR) |
+
+Revoking SSH keys does **not** release the first layer's claim.
+
+### 9.1 Networking: mirrored, not NAT
+
+Nothing works without this. Under NAT `eth0` sits on a private `172.x` address
+that no other device on the LAN can reach. Script 09 installs `.wslconfig`; then,
+from **Windows PowerShell**:
+
+```powershell
+wsl --shutdown
+```
+
+Wait a full ~10 seconds before reopening. Reconnecting sooner reuses the old VM
+and the distribution stays on NAT. Confirm `ip -4 addr` shows the real LAN
+address, not `172.x`.
+
+### 9.2 Hyper-V firewall
+
+Mirrored networking still blocks inbound (`DefaultInboundAction: Block`). From an
+**elevated PowerShell**:
+
+```powershell
+$wsl = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
+New-NetFirewallHyperVRule -Name "WSL-SSH" -DisplayName "WSL SSH" `
+  -Direction Inbound -VMCreatorId $wsl -Protocol TCP -LocalPorts 22 -Action Allow
+New-NetFirewallHyperVRule -Name "WSL-Mosh" -DisplayName "WSL Mosh" `
+  -Direction Inbound -VMCreatorId $wsl -Protocol UDP -LocalPorts 60000-61000 -Action Allow
+```
+
+Two narrow rules, **not** `DefaultInboundAction Allow` — that opens every port on
+the VM. `netsh portproxy` is not an alternative either: it forwards TCP only, and
+Mosh needs UDP 60000-61000.
+
+### 9.3 Pairing (manual, on purpose)
+
+```bash
+moshi-hook pair --token <token from the app> --store file
+systemctl --user restart moshi-hook.service
+```
+
+`--store file` because there is no Keychain on Linux. The token comes from the
+app under `Settings → Integrations` (or `Settings → Hooks`, depending on the
+version).
+
+Check `moshi-hook host list | grep -v revoked` first: if `pair` already
+provisioned the SSH key, `host setup` and its QR scan are unnecessary.
+
+---
+
 ## Verify
 
 Open a new terminal and check each line:
@@ -115,6 +178,30 @@ brew bundle check --file=os/linux/brew/Brewfile
 `herdr` starts automatically in an interactive shell. If it does not, the
 `start_if_needed` guard at the end of `.zshrc` says why.
 
+Then remote access:
+
+```bash
+ip -4 -o addr show | grep -v ' lo '   # real LAN address, NEVER 172.x
+ss -tln | grep ':22 '                 # sshd listening
+moshi-hook probe                      # running: true, gateway: true
+moshi-hook host list | grep -v revoked
+```
+
+Check port 22 with `ss`, not `systemctl is-active ssh`: Ubuntu 24.04 activates
+sshd through `ssh.socket`, so the service unit reads inactive while the port is
+listening — a false negative.
+
+`ssh <user>@<lan-ip>` answering `Permission denied (publickey)` is **success**,
+not failure: it proves TCP arrived, sshd answered and it demands a key. Moshi's
+private keys live on the phone, not here. To confirm password auth is off
+without needing sudo:
+
+```bash
+ssh -o PubkeyAuthentication=no -o PreferredAuthentications=password <user>@localhost
+```
+
+That must return `Permission denied (publickey)`.
+
 ---
 
 ## Not in the repository, on purpose
@@ -127,6 +214,8 @@ brew bundle check --file=os/linux/brew/Brewfile
 | Atuin history, zoxide index | Data | Copy `~/.local/share/{atuin,zoxide}` or start fresh |
 | `config/nvim/spell/` | 24 MB of regenerable dictionaries | Neovim downloads them on demand |
 | Project repositories | Cloned per machine | The empty folder skeleton arrives in step 6 |
+| Moshi pairing (`~/.local/state/moshi/secrets.json`, `authorized_keys`) | Host credentials and per-device keys, bound to one app install | Re-pair — step 9.3 |
+| Hyper-V firewall rules | Live on Windows and need elevation | Run the two commands in step 9.2 |
 
 ---
 
@@ -143,12 +232,77 @@ herdr server reload-config
 herdr also writes its own interface preferences back into that file, so expect it
 to show as modified after tweaking things in the UI.
 
-**Agent notifications need `delivery = "terminal"`.** The `system` mode shells out
-to `notify-send`, which is not installed in WSL and has no notification daemon to
-talk to. `terminal` emits OSC 9, which Windows Terminal turns into a real Windows
-toast — so it still reaches you with another application in front. Toasts only
-fire for background panes; watching the pane that finishes shows nothing, by
-design.
+**No herdr delivery mode works on its own under WSL.** This corrects an earlier
+version of this file, which claimed `terminal` worked. It does not. All three
+modes fail, for different reasons:
+
+- `system` shells out to `notify-send`, which is not installed in WSL and has no
+  notification daemon to talk to.
+- `terminal` emits OSC 9, but **Windows Terminal does not render OSC 9 toasts**.
+  Verified by writing the escape sequence straight to the outer pty, bypassing
+  herdr entirely: nothing appears, in either the BEL or ST terminator form.
+- `herdr` draws the toast inside the TUI, so it never reaches you with another
+  window in front.
+
+The config keeps `delivery = "herdr"` because that at least works while herdr is
+on screen. The real visual alert and the sound both come from the shim below.
+
+To test OSC 9 yourself: a pane's pty is NOT the terminal's. Find the client's
+with `ls -l /proc/<herdr-client-pid>/fd/1` and write there.
+
+Sound only fires for agents in **background** workspaces. Watching the pane that
+finishes gives you nothing, by design.
+
+**`tools/herdr/herdr-mp3-shim` exists because herdr cannot play its own sounds
+here.** herdr has no audio engine: it writes a temporary mp3 and delegates to an
+external player, probing for `ffplay`, `mpv`, `mpg123`, `paplay`, `aplay`, `vlc`,
+`play`, `pw-play`, `powershell`, `pwsh` and `cmd.exe`. Two things broke that, and
+the shim — installed as `paplay`, the first Linux name herdr picks — fixes both:
+
+1. *The path.* herdr hands the player a **Linux** path (`/tmp/herdr-sound-*.mp3`)
+   that no Windows player can open. The shim converts it with `wslpath` to
+   `\\wsl.localhost\<distro>\...`. Never hardcode the distro name — this one is
+   called `gentleman`, not `Ubuntu`.
+2. *The PATH.* These dotfiles deliberately strip every `/mnt/c` entry from PATH,
+   so herdr found no player at all and failed with `no mp3-capable audio player
+   available` — leaving no trace in `herdr-server.log`, which only ever reports
+   `outcome="ok"`.
+
+Do **not** put `powershell` or `powershell.exe` on PATH to fix this. herdr probes
+for them before the Linux names and prefers them, and its own PowerShell path
+handling is the broken one, so the sound goes silent again. Call PowerShell by
+absolute path, as the shim does.
+
+The shim also raises the Windows toast with `NotifyIcon` on the same PowerShell
+call. Audio goes through `MediaPlayer` (presentationCore); `System.Media.SoundPlayer`
+would not work, it is WAV-only. herdr passes only the audio file, never the
+notification title or body, so the visual text is generic by necessity.
+
+Debug it with:
+
+```bash
+: > ~/.local/state/herdr-sound.log
+herdr notification show "test" --sound done
+cat ~/.local/state/herdr-sound.log
+```
+
+**Restart the moshi-hook daemon after `pair` or `unpair`.** Both rewrite
+`secrets.json` but do not signal the running daemon, which keeps the old identity
+in memory and gets `Invalid host secret` on every API call. With the event
+channel down no notification goes out at all, whatever the settings say. Note
+that `moshi-hook probe` reads the host id from the *file*, not the process, so it
+shows the new one while the daemon still uses the old — confirm in the log with
+`ws bridge connected hostId=<expected>`.
+
+**`unpair` + `pair` mints a new host id rather than transferring the old one.**
+The previous device's SSH key is then orphaned but still live: its comment points
+at the old host id, and `authorized_keys` knows nothing about Moshi host ids, so
+that device keeps shell access until the key is revoked by hand.
+
+**Two devices at once requires Moshi Pro.** The free tier is account-less, so
+every install carries its own implicit identity and a host belongs to exactly
+one. That is why a second device reports the host is already paired with another
+account even when no account was ever created.
 
 **Develop on ext4, not on `/mnt`.** The Windows drives go through 9p, measured
 here at 136x slower for creating a thousand small files, and inotify never fires
