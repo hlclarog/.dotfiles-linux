@@ -1,8 +1,17 @@
+# `$fill` used to pad this line to the exact terminal width, which parked it on
+# the wrap boundary: on a pane resize the line then occupied two rows while zsh
+# ZLE still believed it occupied one, so every redraw appended instead of
+# overwriting and shredded the prompt. Keeping the left prompt short avoids that.
+# The right-hand modules moved to `right_format`, which starship emits as a
+# native zsh RPROMPT that zsh repositions itself on resize.
 format = """\
 ($directory)\
 $os\
 $git_branch\
-$fill\
+\n$character\
+"""
+
+right_format = """\
 $nodejs\
 $rust\
 $golang\
@@ -14,15 +23,11 @@ $conda\
 $zig\
 $cmd_duration\
 $time\
-\n$character\
 """
 
 add_newline = false
 command_timeout = 3600000
 palette = "gentleman"
-
-[fill]
-symbol = ' '
 
 [palettes.catppuccin_mocha]
 rosewater = "#f5e0dc"
