@@ -26,3 +26,6 @@
     # is installed under that name. Both links point at the same script.
     ~/.local/bin/herdr-mp3-shim: tools/herdr/herdr-mp3-shim
     ~/.local/bin/paplay: tools/herdr/herdr-mp3-shim
+    # Relabels worktree workspaces by their branch; herdr names them after the
+    # directory, which for a generated worktree says nothing about the work.
+    ~/.local/bin/herdr-worktree-labels: tools/herdr/herdr-worktree-labels

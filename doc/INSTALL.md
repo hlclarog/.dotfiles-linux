@@ -457,6 +457,31 @@ laptop's hotspot was not: `Get-NetAdapter` showed the Wi-Fi radio
 `Disconnected` and no `192.168.137.x` existed anywhere. Check the adapter state
 on the Windows side before reasoning about routes.
 
+**Worktree workspaces get meaningless names unless you name them.** `herdr
+worktree create` accepts `--branch <NAME>` and `--label <TEXT>`. Without them it
+invents `worktree-<word>-<word>-<hash>` and uses it for *both* the branch and the
+workspace label, so the agents panel lists several entries that say nothing about
+the work and each one has to be opened to identify it. Pass both flags.
+
+For worktrees that already exist, `tools/herdr/herdr-worktree-labels` reads each
+one's checked-out branch and relabels its workspace from it:
+
+```bash
+herdr-worktree-labels --dry-run    # show what would change
+herdr-worktree-labels              # apply
+herdr-worktree-labels --force      # also relabel ones renamed by hand
+```
+
+It records what it wrote to `~/.local/state/herdr-worktree-labels.json` and skips
+any label it did not write, so a name chosen by hand survives. A branch herdr
+generated itself (`worktree/brave-river-15c0`) is left alone, since deriving a
+label from a meaningless branch gains nothing.
+
+Labels are budgeted to 22 characters because **the agents panel truncates at
+about 19**. That is why the repository prefix is dropped rather than the branch:
+`ta-portal > feature/timecard-holiday` renders as `ta-portal > featur...`, which
+is worse than the generated name it replaced.
+
 **Develop on ext4, not on `/mnt`.** The Windows drives go through 9p, measured
 here at 136x slower for creating a thousand small files, and inotify never fires
 so file watchers and hot reload stay silent. `~/Projects` is ext4; `~/Win` is the

@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Label herdr worktree workspaces by their checked-out branch.
+
+herdr names a worktree workspace after its directory. When `herdr worktree
+create` runs without --branch and --label it invents `worktree-<word>-<word>-
+<hash>` and uses that for both, so the agents panel ends up listing several
+workspaces whose names say nothing about the work. The branch usually does say
+something, and herdr already knows it -- it just does not display it.
+
+This walks every worktree-backed workspace, reads its current branch, and
+renames the workspace to a short label derived from that branch.
+
+Two constraints shape the output:
+
+  * The agents panel truncates at roughly 19 characters, so a label like
+    "ta-portal > feature/timecard-holiday" renders as "ta-portal > featur..."
+    and is worse than useless. The distinguishing token has to come first and
+    the repository prefix is what gets dropped.
+  * A label the user set by hand must survive. State is kept so a workspace is
+    only relabelled when its current label is one this script wrote, or the
+    herdr-generated `worktree-*` form. Anything else is left alone unless
+    --force says otherwise.
+
+Usage:
+  herdr-worktree-labels [--dry-run] [--force] [--width N]
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+
+STATE = os.path.expanduser("~/.local/state/herdr-worktree-labels.json")
+
+# Conventional-commit style prefixes, shortened so the branch body keeps room.
+PREFIX = {
+    "feature": "feat",
+    "feat": "feat",
+    "bugfix": "fix",
+    "fix": "fix",
+    "hotfix": "hot",
+    "chore": "chore",
+    "refactor": "ref",
+    "docs": "docs",
+    "release": "rel",
+    "perf": "perf",
+    "test": "test",
+}
+
+# Words that burn width without distinguishing one branch from another.
+NOISE = {
+    "add", "added", "remove", "removed", "update", "updated", "new", "old",
+    "plumbing", "support", "handling", "cleanup", "wip", "tmp", "the", "and",
+    "for", "with", "from", "into", "type", "types",
+}
+
+# herdr's own generated branch name carries no meaning worth displaying.
+GENERATED = re.compile(r"^worktree/[a-z]+-[a-z]+-[0-9a-f]+$")
+
+
+def herdr(*args):
+    """Run a herdr CLI command and return its parsed `result` object."""
+    out = subprocess.run(
+        ["herdr", *args], capture_output=True, text=True, check=False
+    )
+    if out.returncode != 0:
+        raise RuntimeError(f"herdr {' '.join(args)}: {out.stderr.strip()}")
+    try:
+        return json.loads(out.stdout)["result"]
+    except (json.JSONDecodeError, KeyError) as exc:
+        raise RuntimeError(f"herdr {' '.join(args)}: unreadable output") from exc
+
+
+def branch_of(path):
+    """The branch checked out at `path`, or None if detached or unreadable."""
+    out = subprocess.run(
+        ["git", "-C", path, "branch", "--show-current"],
+        capture_output=True, text=True, check=False,
+    )
+    name = out.stdout.strip()
+    return name if out.returncode == 0 and name else None
+
+
+def derive(branch, width):
+    """Short, front-loaded label for a branch, or None if it says nothing."""
+    if not branch or GENERATED.match(branch):
+        return None
+
+    if "/" in branch:
+        kind, rest = branch.split("/", 1)
+        tag = PREFIX.get(kind.lower(), kind.lower()[:4])
+    else:
+        tag, rest = "", branch
+
+    words = [w for w in re.split(r"[-_/]+", rest) if w]
+    meaty = [w for w in words if w.lower() not in NOISE] or words
+
+    body = ""
+    for word in meaty:
+        candidate = f"{body}-{word}" if body else word
+        full = f"{tag} {candidate}".strip()
+        if len(full) > width and body:
+            break
+        body = candidate
+
+    return f"{tag} {body}".strip() or None
+
+
+def load_state():
+    try:
+        with open(STATE) as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        # A missing or corrupt state file means "nothing is ours yet", which is
+        # the safe reading: it makes the script skip rather than clobber.
+        return {}
+
+
+def save_state(state):
+    os.makedirs(os.path.dirname(STATE), exist_ok=True)
+    tmp = STATE + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(state, fh, indent=2, sort_keys=True)
+    os.replace(tmp, STATE)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print what would change and exit")
+    ap.add_argument("--force", action="store_true",
+                    help="relabel even workspaces renamed by hand")
+    ap.add_argument("--width", type=int, default=22,
+                    help="label budget in characters (default: 22)")
+    args = ap.parse_args()
+
+    try:
+        workspaces = herdr("workspace", "list")["workspaces"]
+    except RuntimeError as exc:
+        print(f"herdr is not reachable: {exc}", file=sys.stderr)
+        return 1
+
+    state = load_state()
+    changed = skipped = 0
+
+    for ws in workspaces:
+        tree = ws.get("worktree")
+        if not tree or not tree.get("is_linked_worktree"):
+            continue
+
+        wid, current = ws["workspace_id"], ws.get("label", "")
+        path = tree.get("checkout_path")
+        if not path or not os.path.isdir(path):
+            continue
+
+        wanted = derive(branch_of(path), args.width)
+        if wanted is None:
+            # No branch worth showing. Leave whatever is there; a generated
+            # name is no worse than a generated branch.
+            continue
+        if wanted == current:
+            continue
+
+        ours = current == state.get(wid) or current.startswith("worktree-")
+        if not ours and not args.force:
+            print(f"  skip  {wid}  {current!r} was renamed by hand")
+            skipped += 1
+            continue
+
+        print(f"  {'would ' if args.dry_run else ''}rename  "
+              f"{wid}  {current!r} -> {wanted!r}")
+        if not args.dry_run:
+            try:
+                herdr("workspace", "rename", wid, wanted)
+            except RuntimeError as exc:
+                print(f"  failed  {wid}: {exc}", file=sys.stderr)
+                continue
+            state[wid] = wanted
+        changed += 1
+
+    if changed and not args.dry_run:
+        save_state(state)
+
+    if not changed and not skipped:
+        print("labels already match their branches")
+    elif skipped:
+        print(f"{changed} relabelled, {skipped} left alone (--force overrides)")
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
