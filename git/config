@@ -15,3 +15,9 @@
 # script whose shebang ends in \r fails with "bad interpreter".
 [includeIf "gitdir:/mnt/"]
 	path = ~/.dotfiles/git/config-windows-drives
+[credential "https://github.com"]
+	helper = 
+	helper = !/home/linuxbrew/.linuxbrew/bin/gh auth git-credential
+[credential "https://gist.github.com"]
+	helper = 
+	helper = !/home/linuxbrew/.linuxbrew/bin/gh auth git-credential
