@@ -49,7 +49,7 @@ yellow = "#DEBA87"   # 10.94:1
 
 [ui]
 accent = "#6FA0AF"
-agent_panel_sort = "spaces"
+agent_panel_sort = "priority"
 show_agent_labels_on_pane_borders = true
 
 status_indicators = "symbols"
