@@ -156,8 +156,110 @@ systemctl --user restart moshi-hook.service
 app under `Settings → Integrations` (or `Settings → Hooks`, depending on the
 version).
 
-Check `moshi-hook host list | grep -v revoked` first: if `pair` already
-provisioned the SSH key, `host setup` and its QR scan are unnecessary.
+Then provision the device's SSH key. `pair` sometimes does this on its own and
+sometimes does not, so verify rather than assume:
+
+```bash
+moshi-hook host list | grep -v revoked
+wc -l < ~/.ssh/authorized_keys
+```
+
+If no key is listed, run `host setup` **in a terminal you can see**: it renders a
+QR to stdout and blocks until the device scans it.
+
+```bash
+moshi-hook host setup --host <reachable-ip> --user "$(id -un)" --port 22
+```
+
+The QR expires in about ten minutes. Nobody can run this step on your behalf, an
+agent included, because the QR has to reach your eyes.
+
+---
+
+### 9.4 Reaching the host: which network the device is on
+
+The two transports are independent and only one of them cares about the network:
+
+| Transport | Carries | Needs inbound? |
+|---|---|---|
+| Cloud gateway | Approvals, push, image paste | No. Outbound WebSocket, works anywhere |
+| SSH / Mosh | The actual terminal | Yes. The device must reach port 22 |
+
+"Notifications work but the terminal does not" is therefore the expected symptom
+of a reachability problem, not two separate faults. Diagnose them separately.
+
+**Do not put the device on the laptop's Mobile Hotspot.** Windows ICS rewrites
+the device's source address to the laptop's own LAN IP, so the device ends up
+addressing the very machine it is talking through. That rebound is NAT hairpin,
+and it dies at key exchange:
+
+```
+sshd: error: kex_exchange_identification: read: Connection reset by peer
+sshd: Connection reset by <the laptop's own LAN IP>
+```
+
+TCP connects and sshd sends its banner, which makes the path look healthy right
+up until it is not. WSL never mirrors the hotspot adapter either, so `ip -4 addr`
+shows no `192.168.137.x` and sshd could not bind there regardless. `netsh
+portproxy` papers over the hairpin but forwards TCP only, which loses Mosh
+permanently.
+
+**Invert it: the phone hosts, the laptop joins.**
+
+```
+phone 172.20.10.1  (router)  <-->  laptop 172.20.10.2/28  (client)
+```
+
+The phone is now the router and the laptop an ordinary client, so phone to laptop
+is a direct same-subnet connection with no NAT in the path. SSH and Mosh both
+work, WSL mirrors the joined Wi-Fi adapter as a normal interface, and the
+existing `LocalSubnet` rules already cover it. The direction of the NAT is what
+decides this: traffic toward the router's own LAN IP hairpins, traffic from the
+router toward a client does not.
+
+Internet stays on the wired link as long as it keeps the lower metric:
+
+```bash
+ip route | grep '^default'    # Ethernet metric 25, phone metric 45
+```
+
+Verify the path end to end:
+
+```bash
+ip -4 -o addr show | grep -v ' lo '    # the hotspot-assigned client IP appears
+ping -c2 172.20.10.1                   # the phone answers
+timeout 5 bash -c 'exec 3<>/dev/tcp/<client-ip>/22 && head -c 40 <&3'
+journalctl -u ssh --since '-10 min' | grep Accepted
+```
+
+`Accepted publickey ... from 172.20.10.1` is the only real proof. Everything
+short of it can pass while the terminal still fails.
+
+### 9.5 Updating moshi-hook
+
+The app suggests `pkill -TERM -f "moshi(-hook)? serve" ; moshi serve &`. **Do not
+run that here.** This host runs the daemon under systemd, so the kill trips
+`Restart=on-failure` while the manual `serve` adds a second daemon fighting for
+the same socket and gateway port, and that one dies at logout. Use:
+
+```bash
+moshi-hook update
+systemctl --user restart moshi-hook.service
+moshi-hook install
+systemctl --user restart moshi-hook.service
+```
+
+`update` replaces the binary and says so, but never restarts the daemon. The
+second `install` matters because a release can add hooks the old one lacked:
+0.3.19 added a `Notification` hook that 0.3.0 had no concept of. Confirm with:
+
+```bash
+moshi-hook status | grep -E 'claude|codex|opencode'    # all three: current
+pgrep -af 'moshi-hook serve'                           # exactly one process
+```
+
+Newly installed hooks do not reach an already-running agent session, which read
+its settings at startup. Only sessions opened afterwards pick them up.
 
 ---
 
@@ -294,6 +396,45 @@ that `moshi-hook probe` reads the host id from the *file*, not the process, so i
 shows the new one while the daemon still uses the old — confirm in the log with
 `ws bridge connected hostId=<expected>`.
 
+**The daemon reads credentials at startup, so restart it after refreshing any
+token.** This is the same trap as the one above, but it is not limited to Moshi
+pairing: it applies to every agent's credentials. `moshi-hook usage` collects
+each agent's quota from its account API, and the daemon holds each fetcher's
+state in memory.
+
+A real case: Codex tokens expired and the OpenAI subscription vanished from the
+session details on the phone. The log said so 46 times.
+
+```
+usage fetcher: repeated poll failures; cached usage is stale agent=codex failureType=http
+usage poller: synced count=1
+```
+
+`count=1` means only one agent is uploading. With two agents configured it has to
+read `count=2`.
+
+The part that nearly produced the wrong conclusion: after `codex login` the
+tokens were demonstrably fresh and `moshi-hook usage` **still** listed only
+claude-code, because the daemon had cached the failure. Only the restart brought
+codex back.
+
+```bash
+codex login
+systemctl --user restart moshi-hook.service
+moshi-hook usage | grep -oE '"agent": "[^"]*"'
+```
+
+**`codex login status` lies.** It prints `Logged in using ChatGPT` with fully
+expired tokens, because it checks that the token fields *exist*, not that they
+are valid. Never use it to rule out an auth problem — read the JWT `exp` claim:
+
+```bash
+python3 -c "import json,base64,datetime;t=json.load(open('$HOME/.codex/auth.json'))['tokens']['access_token'];p=t.split('.')[1];p+='='*(-len(p)%4);print(datetime.datetime.fromtimestamp(json.loads(base64.urlsafe_b64decode(p))['exp']))"
+```
+
+The `chatgpt_plan_type` claim in the same token reports the real plan. If it says
+`plus` and the phone still shows nothing, the subscription is not the problem.
+
 **`unpair` + `pair` mints a new host id rather than transferring the old one.**
 The previous device's SSH key is then orphaned but still live: its comment points
 at the old host id, and `authorized_keys` knows nothing about Moshi host ids, so
@@ -303,6 +444,18 @@ that device keeps shell access until the key is revoked by hand.
 every install carries its own implicit identity and a host belongs to exactly
 one. That is why a second device reports the host is already paired with another
 account even when no account was ever created.
+
+**An advertised `--host` ages badly.** `host setup` bakes one IP into the
+pairing. Office DHCP moved this machine from `.242` to `.229` overnight, and
+cycling the phone's hotspot can reassign its subnet just as easily. Either one
+silently breaks a setup that worked the day before, and the failure looks like a
+Moshi fault rather than a lease change. Re-run `host setup` with the current
+address.
+
+**Verify the topology before trusting it.** A device believed to be on the
+laptop's hotspot was not: `Get-NetAdapter` showed the Wi-Fi radio
+`Disconnected` and no `192.168.137.x` existed anywhere. Check the adapter state
+on the Windows side before reasoning about routes.
 
 **Develop on ext4, not on `/mnt`.** The Windows drives go through 9p, measured
 here at 136x slower for creating a thousand small files, and inotify never fires

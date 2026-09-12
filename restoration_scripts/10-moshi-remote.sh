@@ -78,4 +78,29 @@ cat <<'MSG'
    If that GUID errors, get the right one from Get-NetFirewallHyperVVMCreator.
 MSG
 
-unset moshi_sshd_src moshi_sshd_dst
+# --- 4. One daemon, and only one --------------------------------------------
+# The Moshi app tells you to `pkill` the daemon and relaunch it with
+# `moshi serve &`. That advice assumes a hand-started process. Here systemd owns
+# it, so the kill trips Restart=on-failure while the manual serve adds a second
+# daemon contending for the same socket and gateway port -- and that one dies at
+# logout, taking approvals with it.
+if command -v pgrep >/dev/null 2>&1; then
+	moshi_daemons=$(pgrep -fc 'moshi-hook serve' 2>/dev/null || echo 0)
+	if [ "$moshi_daemons" -gt 1 ]; then
+		echo " > WARNING: $moshi_daemons moshi-hook daemons are running; there must be one."
+		echo " >          Kill the strays and let systemd own it:"
+		echo "     pkill -f 'moshi-hook serve'; systemctl --user restart moshi-hook.service"
+	fi
+fi
+
+# A release can add hooks the installed one never had (0.3.19 introduced a
+# Notification hook absent from 0.3.0), so `install` has to follow `update`.
+cat <<'MSG'
+ > To update Moshi later, use this and NOT the commands the app suggests:
+     moshi-hook update
+     systemctl --user restart moshi-hook.service
+     moshi-hook install
+     systemctl --user restart moshi-hook.service
+MSG
+
+unset moshi_sshd_src moshi_sshd_dst moshi_daemons
