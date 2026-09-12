@@ -263,6 +263,67 @@ its settings at startup. Only sessions opened afterwards pick them up.
 
 ---
 
+## 10. Code knowledge graph for every agent (CodeGraph)
+
+[CodeGraph](https://github.com/colbymchenry/codegraph) keeps a local SQLite graph
+of a codebase's symbols, edges and files, served to agents over MCP. No API keys
+and no external service. It is **per project**: `codegraph init` creates
+`.codegraph/`, and until that exists the graph tools have nothing to answer
+from. Restoration script 11 wires it into every agent that can take it.
+
+### 10.1 Why a hook and not a skill
+
+A skill is *model-invoked*: the model decides whether to load it, so it can never
+deliver "always, before starting work". A hook is *harness-executed* and
+deterministic. The goal is that an agent tells you to run `codegraph init` on an
+unindexed project before it starts tracing call paths, so `SessionStart` is the
+right event.
+
+CodeGraph's own bundled hook cannot do this job. `codegraph prompt-hook` is
+**silent** on an unindexed project: pipe a payload into it where no
+`.codegraph/` exists and you get empty stdout and exit 0, logged in its telemetry
+as `prompt-hook-gate-noop-no-index`. It never reports the missing index, which is
+the one case worth reporting.
+
+### 10.2 There is no hook parity between agents
+
+| Agent | Session hook | How context is injected |
+|---|---|---|
+| Claude Code | native, `~/.claude/settings.json` | `hookSpecificOutput.additionalContext` JSON on stdout |
+| Codex | native, `~/.codex/hooks.json` (same schema) | plain stdout becomes context |
+| opencode | **none** | plugin in `~/.config/opencode/plugins/*.ts`, via the `chat.message` hook |
+| Pi | **none at all** | not applicable - excluded on purpose |
+
+opencode plugins get no id generator, so a synthetic part has to copy ids from an
+existing part. `plugins/skill-registry.ts` is the working template.
+
+**Pi is excluded deliberately, not overlooked.** It has no hook system: nothing
+in `~/.pi/agent/settings.json`, nothing in `pi --help`, only extensions and
+`--append-system-prompt`. It also needs nothing, because gentle-pi already ships
+`extensions/codegraph-tools.ts` whose tool description says to run `init` before
+querying an unindexed workspace. A reminder would duplicate it.
+
+### 10.3 What carries the behaviour
+
+Three files, all symlinked through `symlinks/conf.yaml`:
+
+```
+tools/codegraph/codegraph                     stable-PATH wrapper (see the gotcha)
+tools/codegraph/codegraph-session-reminder    shared by Claude Code and Codex
+tools/codegraph/codegraph-index-reminder.ts   the opencode plugin
+```
+
+The reminder stays quiet unless all three hold: the directory is a real project
+(`.git`, `package.json`, `go.mod`, `Cargo.toml`, `pyproject.toml` and friends),
+`.codegraph/` is missing, and the `codegraph` binary exists. It is silent in
+`$HOME`, at `/`, in markerless directories and on already-indexed projects, and
+it always exits 0.
+
+It only reads stdin when `--cwd` is absent **and** stdin is not a TTY. Blocking on
+an unwritten pipe would stall every single session start.
+
+---
+
 ## Verify
 
 Open a new terminal and check each line:
@@ -481,6 +542,49 @@ Labels are budgeted to 22 characters because **the agents panel truncates at
 about 19**. That is why the repository prefix is dropped rather than the branch:
 `ta-portal > feature/timecard-holiday` renders as `ta-portal > featur...`, which
 is worse than the generated name it replaced.
+
+**`codegraph install` leaves the MCP server unregistered.** It writes the
+`UserPromptSubmit` hook and the `mcp__codegraph__*` permission into
+`~/.claude/settings.json`, but registers the MCP server in *none* of the three
+agents - so the allowlist points at tools that do not exist. Observed here after
+it had already run four times. Always confirm afterwards:
+
+```bash
+claude mcp list          # expect: codegraph OK Connected
+```
+
+**The fnm PATH trap: never symlink an npm global shim.** `npm i -g` under fnm
+lands in a version-scoped prefix reachable only through a per-PID multishell
+directory under `/run/user/$UID/fnm_multishells/`. The tempting dismissal - "I
+won't change Node versions, so this can't affect me" - is the wrong question:
+shells on *other* versions already exist right now. Measured on this machine,
+v16.14.0 and v24.14.1 were both installed, `codegraph` existed only under
+v24.14.1, and 6 live multishells pointed at v16.14.0. Launching an agent from any
+of those 6 breaks all three MCP registrations at once.
+
+A symlink does not fix it, because the shim's shebang is `#!/usr/bin/env node`:
+
+```
+$ env -i PATH=/usr/bin:/bin ~/.local/bin/codegraph --version
+1.6.0
+$ env -i PATH=/usr/bin:/bin <the npm shim> --version
+/usr/bin/env: 'node': No such file or directory
+```
+
+So `~/.local/bin/codegraph` is a **bash wrapper**, not a symlink. It resolves the
+shim through the stable `fnm/aliases/default/bin` path and prepends that same
+directory to `PATH` so the shebang always finds a Node. One wrapper on a stable
+PATH entry fixes every agent at once and lets the MCP entries keep using the bare
+name. `/run/user` is tmpfs, so multishell directories are recreated per shell on
+every boot - the wrapper is what survives, never the multishell.
+
+**Two Node API traps worth remembering.** `child_process.execFile` has **no**
+`input` option - that is `execFileSync`. Pass `input` to `execFile` and the child
+blocks on an unwritten stdin pipe until the timeout and returns empty stdout,
+which here would have added a 2-second stall to every opencode startup. And
+`TextPart` is **not** re-exported by `@opencode-ai/plugin`; its `index.d.ts` only
+re-exports `./tool.js` plus type-only imports from `@opencode-ai/sdk`, so
+importing it breaks plugin load.
 
 **Develop on ext4, not on `/mnt`.** The Windows drives go through 9p, measured
 here at 136x slower for creating a thousand small files, and inotify never fires

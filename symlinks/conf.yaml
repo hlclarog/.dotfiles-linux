@@ -29,3 +29,11 @@
     # Relabels worktree workspaces by their branch; herdr names them after the
     # directory, which for a generated worktree says nothing about the work.
     ~/.local/bin/herdr-worktree-labels: tools/herdr/herdr-worktree-labels
+    # `codegraph` must NOT be a symlink to the npm shim. The shim's shebang is
+    # `#!/usr/bin/env node`, so an absolute path to it still dies wherever Node
+    # is not on PATH. The wrapper supplies both the shim and a Node.
+    ~/.local/bin/codegraph: tools/codegraph/codegraph
+    # Shared by the Claude Code and Codex SessionStart hooks.
+    ~/.local/bin/codegraph-session-reminder: tools/codegraph/codegraph-session-reminder
+    # opencode has no session-hook file, so the same reminder arrives as a plugin.
+    ~/.config/opencode/plugins/codegraph-index-reminder.ts: tools/codegraph/codegraph-index-reminder.ts

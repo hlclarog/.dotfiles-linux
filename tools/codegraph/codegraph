@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# codegraph — stable entrypoint.
+#
+# The real binary is an npm shim under the fnm-scoped global prefix, reachable
+# only through a per-PID fnm multishell dir. Agents launched from a shell on a
+# different Node version (this machine keeps v16.14.0 shells alive) or from a
+# context with no Node at all would not find it. This wrapper guarantees both
+# the shim and a Node to run it, so `codegraph` resolves the same everywhere.
+
+set -euo pipefail
+
+FNM_DEFAULT_BIN="$HOME/.local/share/fnm/aliases/default/bin"
+SHIM="$FNM_DEFAULT_BIN/codegraph"
+
+if [ ! -x "$SHIM" ]; then
+  echo "codegraph: not installed under the fnm default alias ($SHIM)" >&2
+  echo "codegraph: reinstall with  npm i -g @colbymchenry/codegraph" >&2
+  exit 127
+fi
+
+# The shim's shebang is `#!/usr/bin/env node`; put its own Node first so the
+# wrapper never depends on what the caller happened to have on PATH.
+export PATH="$FNM_DEFAULT_BIN:$PATH"
+
+exec "$SHIM" "$@"

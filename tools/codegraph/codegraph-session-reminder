@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# codegraph-session-reminder
+#
+# SessionStart hook shared by Claude Code and Codex. Reminds the agent to get a
+# CodeGraph index running before it starts working in a project.
+#
+# CodeGraph's own `codegraph prompt-hook` stays silent on an unindexed project
+# (empty stdout, exit 0, telemetry `prompt-hook-gate-noop-no-index`), so nothing
+# otherwise tells you the index is missing.
+#
+# Usage: codegraph-session-reminder [--format claude|text] [--cwd <path>]
+# Without --cwd it reads the hook's {cwd} JSON on stdin; falls back to $PWD.
+# Callers with no stdin to give (an OpenCode plugin, a manual run) must pass
+# --cwd: reading stdin that nobody writes would stall the session.
+# Always exits 0 — a startup hook must never block a session.
+
+set -uo pipefail
+
+FORMAT="text"
+CWD=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --format) FORMAT="${2:-text}"; shift 2 ;;
+    --cwd)    CWD="${2:-}";        shift 2 ;;
+    *)        shift ;;
+  esac
+done
+
+# Resolve the binary through the stable fnm alias first: the bare `codegraph` on
+# PATH lives in a per-PID fnm multishell dir that does not exist for every caller.
+CODEGRAPH=""
+for candidate in \
+  "$HOME/.local/share/fnm/aliases/default/bin/codegraph" \
+  "$HOME/.local/bin/codegraph" \
+  "$(command -v codegraph 2>/dev/null || true)"
+do
+  [ -n "$candidate" ] && [ -x "$candidate" ] && { CODEGRAPH="$candidate"; break; }
+done
+
+# No CodeGraph installed is not a problem to report at every session start.
+[ -z "$CODEGRAPH" ] && exit 0
+
+# Only consult stdin when --cwd was not supplied and stdin is a real pipe:
+# blocking on a terminal or an unwritten pipe would stall every session start.
+if [ -z "$CWD" ] && [ ! -t 0 ]; then
+  STDIN_JSON="$(timeout 2 cat 2>/dev/null || true)"
+  CWD="$(printf '%s' "$STDIN_JSON" \
+    | grep -o '"cwd"[[:space:]]*:[[:space:]]*"[^"]*"' \
+    | head -1 | sed 's/.*:[[:space:]]*"\(.*\)"/\1/')"
+fi
+[ -z "$CWD" ] && CWD="$PWD"
+[ -d "$CWD" ] || exit 0
+
+# Never nag outside a project: $HOME, /, and markerless scratch dirs are normal.
+[ "$CWD" = "$HOME" ] && exit 0
+[ "$CWD" = "/" ] && exit 0
+IS_PROJECT=0
+for marker in .git .hg .svn package.json go.mod Cargo.toml pyproject.toml \
+              pom.xml build.gradle composer.json Gemfile mix.exs deno.json
+do
+  [ -e "$CWD/$marker" ] && { IS_PROJECT=1; break; }
+done
+[ "$IS_PROJECT" -eq 0 ] && exit 0
+
+# An existing index keeps syncing on its own (~2s debounced watcher). Stay quiet.
+[ -d "$CWD/.codegraph" ] && exit 0
+
+read -r -d '' MESSAGE <<'MSG'
+CodeGraph is installed but this project has NO index (.codegraph/ is missing).
+
+Before doing structural work here — tracing call paths, assessing the impact of
+a change, locating where a symbol is used, or any "how does X connect to Y"
+question — tell the user this project is unindexed and suggest they run:
+
+    codegraph init
+
+One indexed query replaces many speculative file reads. Mention it once, then
+proceed with ordinary tools if the user declines or wants to move on. Do not run
+`codegraph init` yourself without the user's go-ahead: it writes a .codegraph/
+directory and starts a background file watcher.
+MSG
+
+if [ "$FORMAT" = "claude" ]; then
+  # Claude Code reads hookSpecificOutput.additionalContext on SessionStart.
+  python3 - "$MESSAGE" <<'PY' 2>/dev/null || printf '%s\n' "$MESSAGE"
+import json, sys
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "SessionStart",
+        "additionalContext": sys.argv[1],
+    }
+}))
+PY
+else
+  printf '%s\n' "$MESSAGE"
+fi
+
+exit 0
