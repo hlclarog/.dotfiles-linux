@@ -14,6 +14,9 @@
 # requires scanning a QR from the device.
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
+#
+# Covered by restoration_scripts/tests/agent-hooks-regression.sh -- run it after
+# touching any of this; the failures it catches are otherwise silent.
 
 grep -qi microsoft /proc/version 2>/dev/null || return 0
 

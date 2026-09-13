@@ -24,6 +24,9 @@
 # -- the same reason ~/.claude and the opencode plugins stay out of the repo.
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
+#
+# Covered by restoration_scripts/tests/agent-hooks-regression.sh -- run it after
+# touching any of this; the failures it catches are otherwise silent.
 
 command -v herdr >/dev/null 2>&1 || {
 	echo " > herdr is not installed; skipping agent integrations"
