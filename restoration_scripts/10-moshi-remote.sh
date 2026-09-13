@@ -56,6 +56,11 @@ elif ! moshi-hook status 2>/dev/null | grep -q '^status:.*paired'; then
 	echo " > moshi-hook is installed but NOT paired. Pair it from the device:"
 	echo "     moshi-hook pair --token <token from the app> --store file"
 	echo "     moshi-hook service install"
+	# Pairing alone does not always provision the device SSH key, and without it
+	# there is no terminal. Advertise the mDNS name: an IP dies on the next DHCP
+	# lease, a name follows the machine.
+	echo "   Then, in a terminal you can see (it draws a QR and blocks):"
+	echo "     moshi-hook host setup --host \"\$(hostname).local\" --user \"\$(id -un)\" --port 22"
 else
 	moshi-hook service install >/dev/null 2>&1 && echo " > moshi-hook service installed"
 	# Linger keeps the user service alive without an active login session,

@@ -168,11 +168,18 @@ If no key is listed, run `host setup` **in a terminal you can see**: it renders 
 QR to stdout and blocks until the device scans it.
 
 ```bash
-moshi-hook host setup --host <reachable-ip> --user "$(id -un)" --port 22
+moshi-hook host setup --host "$(hostname).local" --user "$(id -un)" --port 22
 ```
 
 The QR expires in about ten minutes. Nobody can run this step on your behalf, an
 agent included, because the QR has to reach your eyes.
+
+**Advertise the mDNS name, never an address.** Windows answers mDNS for its own
+hostname and iOS resolves it through native Bonjour, so `<hostname>.local`
+follows the machine across networks and across DHCP leases while a literal IP
+does not. WSL cannot resolve `.local` itself (`nsswitch.conf` is `files dns`,
+with no avahi) but that is irrelevant — the phone's resolver is the one that
+matters.
 
 ---
 
@@ -506,12 +513,26 @@ every install carries its own implicit identity and a host belongs to exactly
 one. That is why a second device reports the host is already paired with another
 account even when no account was ever created.
 
-**An advertised `--host` ages badly.** `host setup` bakes one IP into the
-pairing. Office DHCP moved this machine from `.242` to `.229` overnight, and
-cycling the phone's hotspot can reassign its subnet just as easily. Either one
-silently breaks a setup that worked the day before, and the failure looks like a
-Moshi fault rather than a lease change. Re-run `host setup` with the current
-address.
+**An advertised IP ages badly — advertise the mDNS name instead.** `host setup`
+bakes whatever `--host` receives into the pairing. Given an address, the pairing
+dies on the next lease: office DHCP moved this machine from `.242` to `.229`
+overnight, and cycling the phone's hotspot reassigns the subnet just as easily.
+The failure looks like a Moshi fault rather than a lease change, which is what
+makes it cost hours.
+
+`--host "$(hostname).local"` ends it. Proven here: paired at `192.168.1.24`,
+then DHCP moved the host to `192.168.1.21` (and the OpenVPN adapter from
+`10.237.89.2` to `.7`) and the phone kept connecting —
+`Accepted publickey for hclaro from 192.168.1.3`. Surviving a lease change is a
+stronger proof than switching networks, because the lease change is the exact
+event that used to break it.
+
+Two limits worth knowing. mDNS advertises **every** interface address, so a VPN
+adapter shows up alongside the LAN one; it did not cause a misdial here, but it
+is the first thing to test by disconnecting the VPN. And mDNS is same-network
+only: corporate and guest Wi-Fi commonly block multicast and isolate clients, so
+for a host that must be reachable from a different network the answer is an
+overlay such as Tailscale, whose address never changes at all.
 
 **Verify the topology before trusting it.** A device believed to be on the
 laptop's hotspot was not: `Get-NetAdapter` showed the Wi-Fi radio
