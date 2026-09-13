@@ -607,6 +607,41 @@ which here would have added a 2-second stall to every opencode startup. And
 re-exports `./tool.js` plus type-only imports from `@opencode-ai/sdk`, so
 importing it breaks plugin load.
 
+**Installing one agent tool silently breaks another's hooks.** These tools all
+write into the same per-agent files — `~/.claude/settings.json`,
+`~/.codex/hooks.json`, the opencode plugins directory — and each rewrites the
+hook arrays in its own shape. Nothing is deleted; the other tool simply stops
+recognising its own entry and marks it `stale`. Nothing announces it.
+
+Observed three times on this machine:
+
+| What was installed | What it broke |
+|---|---|
+| `codegraph install` | wrote hooks and a permission entry, registered the MCP server nowhere |
+| brew upgrading herdr to 0.9.0 | staled moshi's `claude` hooks — a week of lost notifications |
+| `herdr integration install codex` | staled moshi's `codex` hook immediately |
+
+The second one is the expensive kind. A stale `Stop` entry means **no
+notification when an agent finishes**, and the only trace is a WARN line in
+`~/.local/state/moshi/hook.log`:
+
+```
+agent hooks missing or stale; rerun install target=claude missing="Stop entries outdated"
+```
+
+Two rules follow. **Order: herdr first, moshi last** — reinstalling moshi is the
+only way to undo the staling, so it has to run after anything else that touches
+those files. Restoration script 12 encodes exactly this, and restarts the daemon
+afterwards because it reads the hook config only at startup.
+
+**And re-check after every install or upgrade**, including one you did not run
+yourself, such as a `brew upgrade` that happened to bump herdr:
+
+```bash
+moshi-hook status | grep -E 'claude|codex|opencode'   # want: current
+herdr integration status                              # want: current (vN)
+```
+
 **Develop on ext4, not on `/mnt`.** The Windows drives go through 9p, measured
 here at 136x slower for creating a thousand small files, and inotify never fires
 so file watchers and hot reload stay silent. `~/Projects` is ext4; `~/Win` is the
