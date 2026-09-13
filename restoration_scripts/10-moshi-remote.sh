@@ -63,6 +63,31 @@ elif ! moshi-hook status 2>/dev/null | grep -q '^status:.*paired'; then
 	echo "     moshi-hook host setup --host \"\$(hostname).local\" --user \"\$(id -un)\" --port 22"
 else
 	moshi-hook service install >/dev/null 2>&1 && echo " > moshi-hook service installed"
+	# `moshi-hook service install` pins Environment=PATH=/usr/local/bin:/usr/bin:/bin
+	# into the unit and rewrites it on every run. The daemon resolves multiplexers
+	# from that PATH, so anything installed outside it is invisible: herdr lives
+	# under linuxbrew here, and `moshi-hook status` reported `herdr: not found`
+	# while the client-side hook detected herdr perfectly from an interactive
+	# shell. A client that sees herdr does not help -- the daemon is what drives
+	# the session. Re-prepend the real locations after every install.
+	moshi_unit="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/moshi-hook.service"
+	moshi_extra_path=""
+	for moshi_bin in moshi-hook herdr tmux zellij; do
+		moshi_dir=$(command -v "$moshi_bin" 2>/dev/null) || continue
+		moshi_dir=$(dirname "$moshi_dir")
+		# Skip anything the stock PATH already covers, and anything already queued.
+		case ":$moshi_extra_path:/usr/local/bin:/usr/bin:/bin:" in
+		*":$moshi_dir:"*) ;;
+		*) moshi_extra_path="${moshi_extra_path:+$moshi_extra_path:}$moshi_dir" ;;
+		esac
+	done
+	if [ -n "$moshi_extra_path" ] && grep -q '^Environment=PATH=' "$moshi_unit" 2>/dev/null &&
+		! grep -q "^Environment=PATH=$moshi_extra_path:" "$moshi_unit"; then
+		sed -i "s|^Environment=PATH=|Environment=PATH=$moshi_extra_path:|" "$moshi_unit"
+		systemctl --user daemon-reload
+		systemctl --user restart moshi-hook.service
+		echo " > moshi-hook unit PATH extended with $moshi_extra_path"
+	fi
 	# Linger keeps the user service alive without an active login session,
 	# otherwise the daemon dies with the last shell and approvals stop arriving.
 	loginctl enable-linger "$(id -un)" >/dev/null 2>&1
@@ -108,4 +133,4 @@ cat <<'MSG'
      systemctl --user restart moshi-hook.service
 MSG
 
-unset moshi_sshd_src moshi_sshd_dst moshi_daemons
+unset moshi_sshd_src moshi_sshd_dst moshi_daemons moshi_unit moshi_extra_path moshi_bin moshi_dir
