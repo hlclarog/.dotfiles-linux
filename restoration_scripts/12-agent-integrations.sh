@@ -13,6 +13,9 @@
 #   * `codegraph install` wrote hooks but registered the MCP server nowhere.
 #   * brew installing herdr 0.9.0 staled moshi's claude hooks for a week.
 #   * installing the herdr codex integration staled moshi's codex hook instantly.
+#   * pi went stale the same way and stayed that way: step 1 creates
+#     ~/.pi/agent/extensions/ for herdr, moshi's extension is not written
+#     there, and the step 2 guard below used to check only the other three.
 #
 # So: herdr first, moshi LAST, then restart the moshi daemon so it reloads the
 # hook config it just wrote.
@@ -56,7 +59,7 @@ done
 # Reinstalling is cheap and idempotent, and it is the only way to undo the
 # staling that step 1 causes. Do not reorder these two blocks.
 if command -v moshi-hook >/dev/null 2>&1; then
-	if moshi-hook status 2>/dev/null | grep -qE '^\s+(claude|codex|opencode)\s+stale'; then
+	if moshi-hook status 2>/dev/null | grep -qE '^\s+(claude|codex|opencode|pi)\s+stale'; then
 		moshi-hook install >/dev/null 2>&1 &&
 			echo " > moshi-hook hooks reinstalled after the herdr integrations"
 		# The daemon reads the hook config at startup and does not notice a
@@ -70,7 +73,7 @@ fi
 
 cat <<'MSG'
  > After ANY agent-tool install or upgrade, re-check both. Neither warns you:
-     moshi-hook status | grep -E 'claude|codex|opencode'
+     moshi-hook status | grep -E 'claude|codex|opencode|pi'
      herdr integration status
 MSG
 
