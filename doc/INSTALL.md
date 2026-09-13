@@ -261,8 +261,8 @@ second `install` matters because a release can add hooks the old one lacked:
 0.3.19 added a `Notification` hook that 0.3.0 had no concept of. Confirm with:
 
 ```bash
-moshi-hook status | grep -E 'claude|codex|opencode'    # all three: current
-pgrep -af 'moshi-hook serve'                           # exactly one process
+moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # all four: current
+pgrep -af 'moshi-hook serve'                                   # exactly one process
 ```
 
 Newly installed hooks do not reach an already-running agent session, which read
@@ -355,6 +355,8 @@ ip -4 -o addr show | grep -v ' lo '   # real LAN address, NEVER 172.x
 ss -tln | grep ':22 '                 # sshd listening
 moshi-hook probe                      # running: true, gateway: true
 moshi-hook host list | grep -v revoked
+moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # all four: current
+moshi-hook status | grep 'herdr:'                              # a path, NOT "not found"
 ```
 
 Check port 22 with `ss`, not `systemctl is-active ssh`: Ubuntu 24.04 activates
@@ -613,13 +615,14 @@ write into the same per-agent files — `~/.claude/settings.json`,
 hook arrays in its own shape. Nothing is deleted; the other tool simply stops
 recognising its own entry and marks it `stale`. Nothing announces it.
 
-Observed three times on this machine:
+Observed four times on this machine:
 
 | What was installed | What it broke |
 |---|---|
 | `codegraph install` | wrote hooks and a permission entry, registered the MCP server nowhere |
 | brew upgrading herdr to 0.9.0 | staled moshi's `claude` hooks — a week of lost notifications |
 | `herdr integration install codex` | staled moshi's `codex` hook immediately |
+| `herdr integration install pi` | staled moshi's `pi` hook, and the repair skipped it |
 
 The second one is the expensive kind. A stale `Stop` entry means **no
 notification when an agent finishes**, and the only trace is a WARN line in
@@ -634,12 +637,71 @@ only way to undo the staling, so it has to run after anything else that touches
 those files. Restoration script 12 encodes exactly this, and restarts the daemon
 afterwards because it reads the hook config only at startup.
 
+The pi row is the one worth studying, because the repair existed and still
+missed it. Script 12 kept two parallel lists of the same agents: pi was in the
+herdr target list that *breaks* hooks and absent from the guard that *repairs*
+them. It only bit when pi was the **only** stale agent — with any other agent
+also stale the guard fired anyway and the bare `moshi-hook install` repaired pi
+in passing, which is what kept it hidden. When a script holds two lists of the
+same targets, the bug is one list drifting from the other; add an agent to both.
+
+pi stales for a different reason than the rest, too. Its hooks are extension
+*files* in `~/.pi/agent/extensions/`, not entries in a config: herdr creates
+that directory for `herdr-agent-state.ts` and moshi's `moshi-hooks.ts` simply is
+not there until `moshi-hook install --target pi` runs.
+
 **And re-check after every install or upgrade**, including one you did not run
 yourself, such as a `brew upgrade` that happened to bump herdr:
 
 ```bash
-moshi-hook status | grep -E 'claude|codex|opencode'   # want: current
-herdr integration status                              # want: current (vN)
+moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # want: current
+herdr integration status                                       # want: current (vN)
+```
+
+Restoration scripts 10 and 12 are pinned by a regression suite, because every
+failure in this section is silent:
+
+```bash
+./restoration_scripts/tests/agent-hooks-regression.sh     # want: 9 passed
+```
+
+**The moshi daemon runs with a PATH that cannot see Homebrew.**
+`moshi-hook service install` writes `Environment=PATH=/usr/local/bin:/usr/bin:/bin`
+into the systemd unit and regenerates it on every run. herdr lives under
+linuxbrew, so the daemon reports it missing while an interactive shell finds it
+perfectly:
+
+```bash
+moshi-hook status | grep herdr     # daemon:  herdr:   not found
+moshi-hook context | grep kind     # client:  "kind": "herdr"
+```
+
+The client detecting herdr does not compensate: the **daemon** is what drives
+the session from the phone. Restoration script 10 re-prepends the real
+locations after every `service install`, discovering them with `command -v` so
+it survives herdr moving. Committing a unit with the right PATH would not work —
+`service install` overwrites it.
+
+**A hand-replayed hook never notifies, so it cannot test notifications.** moshi
+deduplicates agent-stop events per prompt sequence, so piping a `Stop` payload
+into `moshi-hook claude-hook` for a turn that already finished is dropped in
+silence. Only a real new turn is a valid test. To confirm the phone is reachable
+at all, post to the account webhook as a control — it answers
+`{"success":true,"pushSent":1}` and isolates any remaining fault to the hook
+side rather than the device. Its token is a credential and this repository is
+public, so it is not written down here; take it from the Moshi app.
+
+The daemon runs without `-v` and logs almost nothing but the usage poller, so
+that suppression is invisible until you ask for it:
+
+```bash
+systemctl --user stop moshi-hook
+moshi-hook serve -v > /tmp/moshi.log 2>&1 &     # reproduce, then read the DEBUG lines
+systemctl --user restart moshi-hook             # always put systemd back in charge
+```
+
+```
+agent stop suppressed reason=already_completed promptSequence=2 completedPromptSequence=2
 ```
 
 **Develop on ext4, not on `/mnt`.** The Windows drives go through 9p, measured
@@ -673,6 +735,17 @@ Those three flags matter. Without `--casks` the dump silently drops Claude Code
 and Codex, and without them declared a restore comes up with no AI CLIs at all.
 Re-add anything the dump loses because it is declared but not currently
 installed, and keep `os/linux/apt/packages.txt` hand-curated.
+
+**Run the restoration tests after touching scripts 10 or 12.** They stub every
+mutating command, so nothing on the machine changes:
+
+```bash
+./restoration_scripts/tests/agent-hooks-regression.sh
+```
+
+A suite that passes against the broken code proves nothing, so the load-bearing
+case is deliberately narrow: pi stale while the other three are current. Verify
+a new case the same way — make it fail on purpose before trusting it.
 
 `~/.gentle-ai/state.json` is copied rather than symlinked, because gentle-ai
 rewrites it atomically and would replace a symlink with a regular file. Re-export
