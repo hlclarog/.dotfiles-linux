@@ -21,6 +21,11 @@
     ~/.config/herdr/config.toml: config/herdr/config.toml
     ~/.config/nvim: config/nvim
     ~/.config/atuin/config.toml: config/atuin/config.toml
+    # Only config.toml is linked. ~/.config/moshi also holds
+    # claude-identity.json and host-pairings.json, per-install host credentials
+    # that must stay out of a public repo.
+    ~/.config/moshi/config.toml: config/moshi/config.toml
+    ~/.config/nushell/config.nu: config/nushell/config.nu
     ~/.ssh/config: ssh/config
     # herdr looks for `paplay` first among the Linux player names, so the shim
     # is installed under that name. Both links point at the same script.
