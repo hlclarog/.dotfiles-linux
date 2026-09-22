@@ -20,6 +20,13 @@ brew "fzf"
 brew "gcc"
 # Distributed revision control system
 brew "git"
+# GitHub CLI. NOT optional: git/config sets the GitHub credential helper to
+# `!/home/linuxbrew/.linuxbrew/bin/gh auth git-credential`, so without gh every
+# push and pull against GitHub fails on a missing binary.
+brew "gh"
+# Roaming-friendly SSH. Moshi enters over mosh, and INSTALL.md step 9.2 opens
+# UDP 60000-61000 for it -- an open port is useless with no binary behind it.
+brew "mosh"
 # Agent multiplexer that lives in your terminal
 brew "herdr"
 # Simple terminal UI for git commands
@@ -72,3 +79,7 @@ cask "openai"
 # time. alsa-lib backs herdr notification sounds; nss backs headless Chrome.
 brew "alsa-lib"
 brew "nss"
+# PostgreSQL client for the Engram databases in ~/.pgpass. Keg-only, so psql
+# never lands on PATH; reach it at
+# /home/linuxbrew/.linuxbrew/opt/libpq/bin/psql or add that bin to PATH by hand.
+brew "libpq"

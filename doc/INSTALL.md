@@ -736,6 +736,15 @@ and Codex, and without them declared a restore comes up with no AI CLIs at all.
 Re-add anything the dump loses because it is declared but not currently
 installed, and keep `os/linux/apt/packages.txt` hand-curated.
 
+`gh`, `mosh` and `libpq` are declared for the same reason: each is a dependency
+something else in the repo assumes is already there, and none of them shows up
+as missing until the feature that needs it fails. `gh` because `git/config`
+points the GitHub credential helper at its absolute path, so every push and
+pull against GitHub fails without it. `mosh` because step 9.2 opens UDP
+60000-61000 for it — an open port with no binary behind it does nothing.
+`libpq` because it is keg-only and backs the Engram databases in `~/.pgpass`,
+so `psql` never lands on PATH on its own.
+
 **Run the restoration tests after touching scripts 10 or 12.** They stub every
 mutating command, so nothing on the machine changes:
 
