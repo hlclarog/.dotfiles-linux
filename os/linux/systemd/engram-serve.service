@@ -1,0 +1,21 @@
+[Unit]
+Description=Engram daemon for the WSL store, with cloud autosync
+Documentation=man:engram(1)
+After=network-online.target
+
+[Service]
+Type=simple
+# Server URL and token are read from ~/.engram/cloud.json on purpose, so no
+# secret ever lands in this unit file or in the dotfiles repo.
+Environment=ENGRAM_CLOUD_AUTOSYNC=1
+# The Windows engram already owns 7437 and mirrored WSL networking shares the
+# port namespace, so the WSL daemon needs its own port.
+Environment=ENGRAM_PORT=7438
+# Restoration script 13 rewrites this to wherever engram actually resolves, so a
+# different Homebrew prefix does not leave a dead ExecStart behind.
+ExecStart=/home/linuxbrew/.linuxbrew/bin/engram serve
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
