@@ -4,8 +4,8 @@
     "opencode",
     "codex"
   ],
-  "installed_binary_version": "2.4.0",
-  "managed_asset_digest": "sha256:0261e5e2d143528013b54aa1e928e235bff7aaaf1265db566d6b67418eac1a80",
+  "installed_binary_version": "2.9.1",
+  "managed_asset_digest": "sha256:54ae22f8501cdb55d834b1b16a92ddab7e4b28b2c57332291d38490c025a389a",
   "selection_configured": true,
   "components": [
     "engram",
@@ -63,6 +63,10 @@
       "model": "fable",
       "effort": "max"
     },
+    "sdd-research": {
+      "model": "opus",
+      "effort": "max"
+    },
     "sdd-spec": {
       "model": "opus",
       "effort": "max"
@@ -114,18 +118,18 @@
   "model_assignments": {
     "gentle-orchestrator": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-sol",
-      "effort": "low"
+      "model_id": "gpt-6-astra",
+      "effort": "xhigh"
     },
     "jd-fix-agent": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-sol",
-      "effort": "xhigh"
+      "model_id": "gpt-6-astra",
+      "effort": "low"
     },
     "jd-judge-a": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-terra",
-      "effort": "xhigh"
+      "model_id": "gpt-6-astra",
+      "effort": "low"
     },
     "jd-judge-b": {
       "provider_id": "openai",
@@ -174,8 +178,8 @@
     },
     "sdd-design": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-sol",
-      "effort": "xhigh"
+      "model_id": "gpt-6-astra",
+      "effort": "low"
     },
     "sdd-explore": {
       "provider_id": "openai",
@@ -184,8 +188,8 @@
     },
     "sdd-init": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-sol",
-      "effort": "xhigh"
+      "model_id": "gpt-6-astra",
+      "effort": "low"
     },
     "sdd-onboard": {
       "provider_id": "openai",
@@ -194,8 +198,13 @@
     },
     "sdd-propose": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-sol",
-      "effort": "xhigh"
+      "model_id": "gpt-6-astra",
+      "effort": "low"
+    },
+    "sdd-research": {
+      "provider_id": "openai",
+      "model_id": "gpt-6-astra",
+      "effort": "low"
     },
     "sdd-spec": {
       "provider_id": "openai",
@@ -209,10 +218,12 @@
     },
     "sdd-verify": {
       "provider_id": "openai",
-      "model_id": "gpt-5.6-sol",
-      "effort": "xhigh"
+      "model_id": "gpt-6-astra",
+      "effort": "low"
     }
   },
   "persona": "neutral",
-  "last_update_check": "2026-08-20T22:17:32.111298573-05:00"
+  "last_update_check": "2026-09-16T07:51:58.193760955-05:00",
+  "rdd_mode": "on",
+  "rdd_mode_recorded_at": "2026-09-12T02:31:20.384729946Z"
 }
