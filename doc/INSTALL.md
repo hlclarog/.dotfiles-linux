@@ -586,10 +586,10 @@ overnight, and cycling the phone's hotspot reassigns the subnet just as easily.
 The failure looks like a Moshi fault rather than a lease change, which is what
 makes it cost hours.
 
-`--host "$(hostname).local"` ends it. Proven here: paired at `192.168.1.24`,
-then DHCP moved the host to `192.168.1.21` (and the OpenVPN adapter from
-`10.237.89.2` to `.7`) and the phone kept connecting —
-`Accepted publickey for hclaro from 192.168.1.3`. Surviving a lease change is a
+`--host "$(hostname).local"` ends it. Proven here: paired at `<lan-ip-a>`,
+then DHCP moved the host to `<lan-ip-b>` (and the OpenVPN adapter to a new
+address as well) and the phone kept connecting —
+`Accepted publickey for <user> from <phone-ip>`. Surviving a lease change is a
 stronger proof than switching networks, because the lease change is the exact
 event that used to break it.
 
