@@ -135,6 +135,14 @@ The repository saves model names and thinking levels only. Pi authentication
 model availability still depends on valid provider authentication and Pi's
 model catalog.
 
+For Claude profile recovery, `config/pi/claude-profiles.json` saves only the
+model and thinking mappings for `current`, `claude-full` and
+`claude-full.autogen`. Close Pi before running `./scripts/upgrade-pi-claude-opus`
+on an existing registry: it updates exact old Opus references without changing
+the active profile and saves a private backup when it makes changes. The
+migration cannot create a fresh Pi registry; the snapshot is for manual
+recovery, not automatic restore. Restart Pi to load the updated registry.
+
 ---
 
 ## 9. Remote access from a phone or tablet (Moshi)

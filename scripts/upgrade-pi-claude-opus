@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Explicitly migrate exact Opus 5 references in the local Pi profile registry."""
+
+import json
+import math
+import os
+from pathlib import Path
+import stat
+import sys
+import tempfile
+
+KIND = "gentle-pi.agent_model_profiles"
+OLD = "claude-bridge/claude-opus-5"
+NEW = "claude-bridge/claude-opus-5-5"
+TARGET = Path.home() / ".pi/gentle-ai/profiles.json"
+
+
+class UnsafeUpgrade(Exception):
+    """The registry cannot be safely migrated."""
+
+
+def unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate JSON key")
+        result[key] = value
+    return result
+
+
+def finite_float(value):
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError("non-finite JSON number")
+    return parsed
+
+
+def reject_constant(value):
+    raise ValueError("non-finite JSON number")
+
+
+def identity(info):
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def unchanged(info):
+    try:
+        now = TARGET.lstat()
+    except FileNotFoundError as exc:
+        raise UnsafeUpgrade("Registry changed during upgrade; inspect it manually.") from exc
+    if not stat.S_ISREG(now.st_mode) or identity(now) != identity(info):
+        raise UnsafeUpgrade("Registry changed during upgrade; inspect it manually.")
+
+
+def read_registry():
+    try:
+        info = TARGET.lstat()
+        if not stat.S_ISREG(info.st_mode):
+            raise UnsafeUpgrade("Registry is not a regular file; symlinks are refused.")
+        fd = os.open(TARGET, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as file:
+            opened = os.fstat(file.fileno())
+            if not stat.S_ISREG(opened.st_mode) or identity(opened) != identity(info):
+                raise UnsafeUpgrade("Registry changed during read; inspect it manually.")
+            original = file.read()
+            if identity(os.fstat(file.fileno())) != identity(info):
+                raise UnsafeUpgrade("Registry changed during read; inspect it manually.")
+        registry = json.loads(original, object_pairs_hook=unique_object,
+                              parse_float=finite_float, parse_constant=reject_constant)
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise UnsafeUpgrade("Registry is missing, unreadable or malformed; inspect it manually.") from exc
+
+    if (not isinstance(registry, dict) or registry.get("kind") != KIND or
+            type(registry.get("version")) is not int or registry["version"] != 1 or
+            not isinstance(registry.get("profiles"), dict) or
+            type(registry.get("active")) is not str):
+        raise UnsafeUpgrade("Registry has an unsupported schema; inspect it manually.")
+    for profile in registry["profiles"].values():
+        if not isinstance(profile, dict):
+            raise UnsafeUpgrade("Registry has an unsupported profile; inspect it manually.")
+        for entry in profile.values():
+            if (not isinstance(entry, dict) or
+                    ("model" in entry and type(entry["model"]) is not str)):
+                raise UnsafeUpgrade("Registry has an unsupported profile entry; inspect it manually.")
+    return registry, original, info
+
+
+def private_file(prefix, data):
+    fd, path = tempfile.mkstemp(prefix=prefix, dir=TARGET.parent)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            os.fchmod(file.fileno(), 0o600)
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+    except BaseException:
+        os.unlink(path)
+        raise
+    return path
+
+
+def upgrade():
+    registry, original, info = read_registry()
+    count = 0
+    for profile in registry["profiles"].values():
+        for entry in profile.values():
+            if entry.get("model") == OLD:
+                entry["model"] = NEW
+                count += 1
+    if count == 0:
+        unchanged(info)
+        print("Updated 0 model references; registry unchanged.")
+        return
+
+    encoded = (json.dumps(registry, indent=2, ensure_ascii=False, allow_nan=False) + "\n").encode("utf-8")
+    pending = private_file(".profiles.json.pending-", encoded)
+    try:
+        unchanged(info)
+        # Back up the exact original bytes, not a serialization of the parsed registry.
+        private_file("profiles.json.backup-", original)
+        unchanged(info)  # Best-effort guard immediately before the atomic replacement.
+        os.replace(pending, TARGET)
+    finally:
+        if os.path.exists(pending):
+            os.unlink(pending)
+    print(f"Updated {count} model references; restart Pi to reload its registry.")
+
+
+def main():
+    if len(sys.argv) != 1:
+        print("Usage: upgrade-pi-claude-opus", file=sys.stderr)
+        return 2
+    try:
+        upgrade()
+    except (UnsafeUpgrade, OSError, ValueError, TypeError, OverflowError) as exc:
+        if isinstance(exc, UnsafeUpgrade):
+            print(f"Upgrade refused: {exc}", file=sys.stderr)
+        else:
+            print("Upgrade failed safely; inspect registry and private backup manually.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
