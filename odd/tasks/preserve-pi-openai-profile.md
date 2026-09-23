@@ -22,5 +22,8 @@ T1 complete: `config/pi/open-ai-full.autogen.json` stores exactly the recovered 
 ## Verification evidence
 T1: `jq` schema and normalized equality checks against the recovered live profile passed. T2: worker observed two replacement tests RED, then 11 tests GREEN, followed by four overflow failure cases RED and 12 tests GREEN after the parser correction. T3: independent verifier reran `bash restoration_scripts/tests/pi-openai-profile.sh` (12/12 passed), shell syntax, in-memory Python compile, `git diff --check`, and artifact/live equality (true, 26 mappings). Secret-field scan found only `model`/`thinking`; test writes remained in disposable temp homes. `git diff --check` does not cover untracked files. Live restore, concurrent writes/crash recovery, and provider availability were not tested.
 
+## Commit and publication evidence
+Work-unit commit: `b6821658b289803d1f194e5133ba6049f5f2adc7` (`feat(pi): preserve and safely restore the OpenAI agent profile`). Independent verification after commit: 12/12 tests, committed tree exactly five intended files (no `.codegraph/`), artifact equal to the 26-role live profile. Native RDD assessment was unavailable (`package-local-binary-missing`), so no review outcome is claimed.
+
 ## Next step
-Local backup and manual recovery path are ready. User authorized publication to `feat/pi-openai-profile-backup`; commit identity pending, no master integration. Existing `.codegraph/` remains untouched.
+Publish `feat/pi-openai-profile-backup` without merging into master, as authorized. Existing `.codegraph/` remains untouched.
