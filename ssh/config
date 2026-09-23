@@ -1,3 +1,6 @@
+# Machine-specific hosts (private addresses) live outside this public repo.
+Include ~/.ssh/config.d/*
+
 Host github.com
   HostName github.com
   User git
