@@ -1,0 +1,106 @@
+{
+  "gentle-ai-explore": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "high"
+  },
+  "gentle-ai-verify": {
+    "model": "openai-codex/gpt-6-astra",
+    "thinking": "max"
+  },
+  "gentle-ai-worker": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "high"
+  },
+  "jd-fix-agent": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "high"
+  },
+  "jd-judge-a": {
+    "model": "openai-codex/gpt-6-astra",
+    "thinking": "max"
+  },
+  "jd-judge-b": {
+    "model": "openai-codex/gpt-5.6-sol",
+    "thinking": "max"
+  },
+  "orchestrator": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "high"
+  },
+  "review-readability": {
+    "model": "openai-codex/gpt-5.6-terra",
+    "thinking": "high"
+  },
+  "review-refuter": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "max"
+  },
+  "review-reliability": {
+    "model": "openai-codex/gpt-5.6-terra",
+    "thinking": "high"
+  },
+  "review-resilience": {
+    "model": "openai-codex/gpt-5.6-terra",
+    "thinking": "high"
+  },
+  "review-risk": {
+    "model": "openai-codex/gpt-5.6-terra",
+    "thinking": "high"
+  },
+  "review-validator": {
+    "model": "openai-codex/gpt-6-astra",
+    "thinking": "max"
+  },
+  "sdd-apply": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "max"
+  },
+  "sdd-archive": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "medium"
+  },
+  "sdd-design": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "max"
+  },
+  "sdd-explore": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "high"
+  },
+  "sdd-init": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "medium"
+  },
+  "sdd-onboard": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "medium"
+  },
+  "sdd-proposal": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "high"
+  },
+  "sdd-research": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "high"
+  },
+  "sdd-spec": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "max"
+  },
+  "sdd-status": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "medium"
+  },
+  "sdd-sync": {
+    "model": "openai-codex/gpt-6-luna",
+    "thinking": "medium"
+  },
+  "sdd-tasks": {
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "high"
+  },
+  "sdd-verify": {
+    "model": "openai-codex/gpt-6-astra",
+    "thinking": "max"
+  }
+}

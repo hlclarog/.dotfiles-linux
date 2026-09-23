@@ -97,6 +97,44 @@ This regenerates what they produce: `~/.claude`, `~/.config/opencode` and
 `~/.codex`. Those directories are deliberately absent from the repository — they
 are generated output, not configuration.
 
+### Restore the Pi OpenAI model profile (optional, manual)
+
+From the dotfiles checkout, run this **only if you want** the saved 26-role
+`open-ai-full.autogen` mapping in Pi:
+
+```bash
+cd "$HOME/.dotfiles"
+./scripts/restore-pi-openai-profile
+```
+
+This command is not part of `dot self install` or `gentle-ai`. On a new Pi
+registry it creates the profile and makes it active; on an existing registry it
+adds only the missing profile, **never changes the active selection**, and
+returns without writing when the profile already matches. By default, it
+refuses to overwrite a different same-name profile; malformed or symlinked
+registries are always refused. If the 26 OpenAI roles were overwritten with
+Claude mappings, **close Pi first** and review the existing
+`~/.pi/gentle-ai/profiles.json` before choosing explicit recovery:
+
+```bash
+cd "$HOME/.dotfiles"
+./scripts/restore-pi-openai-profile --replace
+```
+
+This replaces only `open-ai-full.autogen` from the trusted repository source,
+without changing other profiles or the active selection. Before changing an
+existing registry, the script saves its **exact original bytes** in a private
+(mode `600`) `profiles.json.backup-*` file alongside it. Review the restored
+profile and retain the backup until you have checked the result; the backup may
+contain private registry data. If the profile already matches, `--replace`
+does nothing and creates no backup. Restart Pi after restoring to reload its
+registry.
+
+The repository saves model names and thinking levels only. Pi authentication
+(`~/.pi/agent/auth.json`) stays private and is **not** restored by this command;
+model availability still depends on valid provider authentication and Pi's
+model catalog.
+
 ---
 
 ## 9. Remote access from a phone or tablet (Moshi)
