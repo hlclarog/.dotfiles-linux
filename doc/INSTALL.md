@@ -3,9 +3,9 @@
 A clean WSL 2 install to a working environment. Roughly 30 minutes, most of it
 unattended downloads.
 
-The order below is not cosmetic. Packages are installed **before** the dotfiles
-restore, because the restoration scripts call `jq` and `fnm` and both come from
-the Brewfile. Restoring first leaves you with no statusline and no pinned Node.
+Step 6 below runs a single `dot self install`. Restoration script 04 installs
+the Brewfile itself, before any script that depends on it, so packages no
+longer need a separate, ordered `dot package import` beforehand.
 
 ---
 
@@ -54,31 +54,54 @@ cd "$HOME/.dotfiles"
 git submodule update --init --recursive modules/dotly
 ```
 
-## 6. Install packages, then restore
+## 6. Restore
 
 ```bash
 export DOTFILES_PATH="$HOME/.dotfiles"
 export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 
-"$DOTLY_PATH/bin/dot" package import   # Brewfile + apt list. This one FIRST.
-"$DOTLY_PATH/bin/dot" self install     # symlinks + restoration scripts
+"$DOTLY_PATH/bin/dot" self install     # symlinks + restoration scripts, Brewfile included
+"$DOTLY_PATH/bin/dot" package import   # apt list (sudo); its Brewfile half is a no-op now
 ```
 
-`package import` runs `brew bundle install`, so it also brings the taps and the
-three casks: Claude Code, Codex and the OpenAI CLI. Homebrew 7 refuses any
-entry from an untrusted third-party tap unless it is written fully qualified
-(`tap/name`) and marked `trusted: true` — a bare `cask "openai"` is silently
-ignored by the trust flag even with the tap declared, so every third-party
-entry in the Brewfile follows that pattern.
+Restoration script 04 installs `os/linux/brew/Brewfile` itself, as the first
+restoration script, before scripts that depend on `jq` or `fnm` run. It also
+pre-trusts every `trusted: true` tap, formula and cask before calling
+`brew bundle install` — Homebrew 7.0.6 has a Linux bug where `brew bundle
+install` aborts entirely on the first untrusted third-party cask even when the
+Brewfile already marks it `trusted: true` (Homebrew's `Skipper.skip?` loads the
+cask, and raises on the untrusted tap, before `installer.rb` ever applies the
+Brewfile's own `trusted:` options). A bare `cask "openai"` would also never be
+recognized as belonging to the `openai/tools` tap, so every third-party entry
+in the Brewfile is written fully qualified (`tap/name`) as well.
 
-`self install` creates the 14 symlinks and runs the restoration scripts: the
-Windows drive link, `/etc/wsl.conf`, the projects skeleton, the Claude Code
-statusline, the gentle-ai selections, the Node pin, the Windows-side
-`.wslconfig` (script 09) and Moshi remote access (script 10). Script 11 also
-installs CodeGraph itself, running `npm i -g @colbymchenry/codegraph` through
-fnm's default Node the first time it finds the wrapper symlinked but no shim
-installed yet. Restoration scripts must be committed executable (`100755`):
-`dot self install` silently skips any script that is not.
+Steps 2 and 3 above (apt prerequisites and Homebrew itself) both need `sudo`
+and are **not** automated by script 04 — it locates an existing `brew` binary
+but never installs one, and skips packages entirely if it finds none.
+
+Script 04 runs `brew bundle install --no-upgrade`, so rerunning `self install`
+on a machine that is already set up installs only what is missing and never
+upgrades anything behind your back.
+
+The apt list in `os/linux/apt/packages.txt` is **not** covered by script 04:
+only `dot package import` installs it, with `sudo`. Run it after `self
+install` — or, with Dotly's `restorer`, answer **Y** to "import previous
+installed packages". Its Brewfile half is then a no-op, because script 04
+already installed everything. Be aware that this import is silent
+(`dot package import >/dev/null 2>&1 | ...`) and always reports success
+regardless of the real result; script 04's output in `~/dotly.log` is the
+place to check whether the Brewfile installed. Re-running `dot self install`
+afterward is not needed just for ordering.
+
+`self install` creates the 14 symlinks and runs the restoration scripts: brew
+packages (script 04), the Windows drive link, `/etc/wsl.conf`, the projects
+skeleton, the Claude Code statusline, the gentle-ai selections, the Node pin,
+the Windows-side `.wslconfig` (script 09) and Moshi remote access (script 10).
+Script 11 also installs CodeGraph itself, running `npm i -g
+@colbymchenry/codegraph` through fnm's default Node the first time it finds the
+wrapper symlinked but no shim installed yet. Restoration scripts must be
+committed executable (`100755`): `dot self install` silently skips any script
+that is not.
 
 ## 7. Apply `/etc/wsl.conf`
 

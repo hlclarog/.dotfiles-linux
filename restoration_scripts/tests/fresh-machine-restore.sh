@@ -5,7 +5,7 @@
 #
 # WHY THIS EXISTS
 # ----------------
-# Three failures survive `dot self install` silently on a fresh machine:
+# Four failures survive `dot self install` silently on a fresh machine:
 #
 #   1. os/linux/brew/Brewfile: Homebrew 7 refuses to load ANY entry from an
 #      untrusted third-party tap, and only trusts a FULLY QUALIFIED name
@@ -27,11 +27,27 @@
 #      an install that always prints "run npm i -g @colbymchenry/codegraph"
 #      and never runs it.
 #
+#   4. `dot self install` sources restoration_scripts/*.sh BEFORE the
+#      restorer's own `dot package import` (modules/dotly/restorer), and that
+#      import throws away all output and always reports success regardless of
+#      the real exit status (`dot package import >/dev/null 2>&1 | _log
+#      ...`). So scripts 06 (jq), 08 (fnm), 11 (codegraph, via fnm) and 13
+#      (engram) used to run before their packages existed, and a failed
+#      import looked identical to a working one. Homebrew 7.0.6 also aborts
+#      `brew bundle install` entirely on the first untrusted cask even when
+#      the Brewfile already marks it `trusted: true` --
+#      Cask::CaskLoader.load raises before installer.rb ever applies the
+#      Brewfile's trust options. restoration_scripts/04-brew-packages.sh
+#      (sorting before 06/08/11/13) installs the Brewfile itself, pre-trusting
+#      every entry first.
+#
 # Nothing here touches the real machine. Bug 1 is checked by parsing the
 # Brewfile text offline -- no `brew` involved. Bugs 2 and 3 source the
 # restoration scripts inside a disposable HOME with every mutating/network
 # command (fnm) stubbed onto PATH; jq is the real one from PATH, since the
-# scripts depend on its actual merge behaviour.
+# scripts depend on its actual merge behaviour. Bug 4 stubs `brew` the same
+# way: the stub records every argv line to a log file instead of touching
+# the real Homebrew.
 #
 # THIS FILE IS NOT PART OF THE RESTORE. `dot self install` collects
 # restoration scripts with `find -mindepth 1 -maxdepth 1`, so a subdirectory
@@ -45,6 +61,7 @@ set -u
 DOTFILES_PATH="${DOTFILES_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 export DOTFILES_PATH
 BREWFILE="$DOTFILES_PATH/os/linux/brew/Brewfile"
+SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
 SCRIPT_06="$DOTFILES_PATH/restoration_scripts/06-claude-statusline.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
 
@@ -215,6 +232,136 @@ contains "wrapper absent: prints a symlink message" "symlinks are not applied" "
 check "wrapper absent: returns success" "0" "$status_e"
 fnm_calls_4=$(wc -l <"$FNM_LOG" | tr -d ' ')
 check "wrapper absent: fnm is never invoked" "0" "$fnm_calls_4"
+
+# ==============================================================================
+# Bug 4 -- 04-brew-packages.sh must install the Brewfile itself, pre-trusting
+# every trusted entry, before scripts 06/08/11/13 need jq/fnm.
+# ==============================================================================
+echo
+echo "04-brew-packages.sh"
+
+BREW_LOG="$SANDBOX/brew.log"
+export BREW_LOG
+mkdir -p "$SANDBOX/stub-brew"
+cat >"$SANDBOX/stub-brew/brew" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$BREW_LOG"
+if [ "$1" = bundle ]; then
+	exit "${BREW_BUNDLE_EXIT:-0}"
+fi
+exit 0
+STUB
+chmod +x "$SANDBOX/stub-brew/brew"
+
+WITH_BREW_PATH="$SANDBOX/stub-brew:/usr/bin:/bin"
+NO_BREW_PATH="/usr/bin:/bin"
+
+run04() {
+	(
+		HOME="$1"
+		PATH="$2"
+		BREW_CANDIDATES="${3-/no/such/brew-a /no/such/brew-b}"
+		BREW_BUNDLE_EXIT="${4:-0}"
+		export HOME PATH BREW_CANDIDATES BREW_BUNDLE_EXIT
+		. "$SCRIPT_04"
+	) >"$SANDBOX/out04" 2>&1
+	echo $?
+}
+
+# Case: no brew on PATH and no fallback candidates present -> skip message,
+# status 0, nothing recorded. BREW_CANDIDATES is a test-only override so this
+# does not depend on the real /home/linuxbrew existing.
+HOME_F="$SANDBOX/home-f"
+mkdir -p "$HOME_F"
+: >"$BREW_LOG"
+status_f=$(run04 "$HOME_F" "$NO_BREW_PATH")
+out_f=$(cat "$SANDBOX/out04")
+contains "no brew: prints a skip message" "Homebrew is not installed" "$out_f"
+check "no brew: returns success" "0" "$status_f"
+calls_f=$(wc -l <"$BREW_LOG" | tr -d ' ')
+check "no brew: brew is never invoked" "0" "$calls_f"
+
+# Case: real repo Brewfile -> every declared tap tapped (including the
+# gentleman-programming custom URL), every trusted: true entry trusted, and
+# `bundle install` is the LAST call, after every trust call.
+HOME_G="$SANDBOX/home-g"
+mkdir -p "$HOME_G"
+: >"$BREW_LOG"
+status_g=$(run04 "$HOME_G" "$WITH_BREW_PATH")
+check "real Brewfile: returns success" "0" "$status_g"
+
+tap_calls=$(grep -E '^tap ' "$BREW_LOG")
+contains "real Brewfile: taps anomalyco/tap" "tap anomalyco/tap" "$tap_calls"
+contains "real Brewfile: taps openai/tools" "tap openai/tools" "$tap_calls"
+contains "real Brewfile: taps the gentleman-programming custom URL" \
+	"tap gentleman-programming/tap https://github.com/Gentleman-Programming/homebrew-tap" "$tap_calls"
+contains "real Brewfile: taps denisidoro/tools" "tap denisidoro/tools" "$tap_calls"
+
+trust_calls=$(grep -E '^trust ' "$BREW_LOG")
+contains "real Brewfile: trusts the openai cask" "trust --cask openai/tools/openai" "$trust_calls"
+for _formula in engram gentle-ai gga opencode gentleman-dots docpars; do
+	contains "real Brewfile: trusts formula $_formula" "$_formula" "$trust_calls"
+done
+unset _formula
+
+last_call=$(tail -n1 "$BREW_LOG")
+check "real Brewfile: bundle install is the last brew call" \
+	"bundle install --no-upgrade --file=$BREWFILE" "$last_call"
+
+last_tap_line=$(grep -n '^tap ' "$BREW_LOG" | tail -n1 | cut -d: -f1)
+first_trust_line=$(grep -n '^trust ' "$BREW_LOG" | head -n1 | cut -d: -f1)
+[ "${last_tap_line:-0}" -lt "${first_trust_line:-999}" ] && tap_before_trust=yes || tap_before_trust=no
+check "real Brewfile: every tap happens before any trust call" "yes" "$tap_before_trust"
+
+contains "real Brewfile: reports success" "Brewfile packages installed" "$(cat "$SANDBOX/out04")"
+
+# Case: bundle install fails -> failure message, status 0.
+: >"$BREW_LOG"
+status_h=$(run04 "$HOME_G" "$WITH_BREW_PATH" "" 1)
+out_h=$(cat "$SANDBOX/out04")
+contains "bundle failure: prints a failure message" "brew bundle install failed" "$out_h"
+check "bundle failure: still returns success" "0" "$status_h"
+
+# Case: Brewfile missing for the platform -> skip, status 0, brew untouched.
+HOME_I="$SANDBOX/home-i"
+mkdir -p "$HOME_I"
+MISSING_DOTFILES="$SANDBOX/no-brewfile-dotfiles"
+mkdir -p "$MISSING_DOTFILES/os/linux/brew"
+: >"$BREW_LOG"
+status_i=$(
+	(
+		HOME="$HOME_I"
+		PATH="$WITH_BREW_PATH"
+		DOTFILES_PATH="$MISSING_DOTFILES"
+		export HOME PATH DOTFILES_PATH
+		. "$SCRIPT_04"
+	) >"$SANDBOX/out04" 2>&1
+	echo $?
+)
+out_i=$(cat "$SANDBOX/out04")
+contains "missing Brewfile: prints a skip message" "skipping" "$out_i"
+check "missing Brewfile: returns success" "0" "$status_i"
+# brew shellenv is expected here -- it runs right after locating brew, before
+# the Brewfile is even checked -- but no tap/trust/bundle call should follow.
+calls_i=$(grep -vc '^shellenv$' "$BREW_LOG")
+check "missing Brewfile: no tap/trust/bundle call is made" "0" "$calls_i"
+
+# ==============================================================================
+# 04-brew-packages.sh must sort before 06/08/11/13 and be committed executable
+# -- `dot self install` silently skips any restoration script that is not.
+# ==============================================================================
+echo
+echo "restoration_scripts ordering"
+
+ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|08|11|13)-')
+expected_order="04-brew-packages.sh
+06-claude-statusline.sh
+08-node.sh
+11-codegraph.sh
+13-engram-daemon.sh"
+check "04 sorts before 06, 08, 11 and 13" "$expected_order" "$ordered"
+[ -x "$SCRIPT_04" ] && script_04_exec=yes || script_04_exec=no
+check "04-brew-packages.sh is executable" "yes" "$script_04_exec"
 
 echo
 if [ "$tests_failed" -eq 0 ]; then
