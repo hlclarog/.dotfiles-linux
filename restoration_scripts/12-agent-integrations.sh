@@ -104,11 +104,19 @@ done
 
 # --- 3. moshi-hook, LAST ----------------------------------------------------
 # Reinstalling is cheap and idempotent, and it is the only way to undo the
-# staling that step 2 causes. Do not reorder these two blocks.
+# staling that step 2 causes -- and the only way to install hooks that were
+# never installed at all, which is what a fresh machine looks like: nothing
+# in `moshi-hook status` reads `stale` there, because there is nothing to be
+# stale FROM. So the trigger is broader than `stale`: any of the four target
+# agents whose line is neither `current` (nothing to do) nor `not found`
+# (the agent itself is not installed here, so there is no hook to install)
+# gets the same repair. Do not reorder these two blocks.
 if command -v moshi-hook >/dev/null 2>&1; then
-	if moshi-hook status 2>/dev/null | grep -qE '^\s+(claude|codex|opencode|pi)\s+stale'; then
+	if moshi-hook status 2>/dev/null |
+		grep -E '^\s+(claude|codex|opencode|pi)\s+' |
+		grep -vE '\s(current|not found)(\s|$)' | grep -q .; then
 		moshi-hook install >/dev/null 2>&1 &&
-			echo " > moshi-hook hooks reinstalled after the herdr integrations"
+			echo " > moshi-hook hooks installed/reinstalled after the herdr integrations"
 		# The daemon reads the hook config at startup and does not notice a
 		# rewrite, so without this the repair does not take effect.
 		systemctl --user restart moshi-hook.service >/dev/null 2>&1 &&

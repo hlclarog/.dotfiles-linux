@@ -68,6 +68,7 @@ SCRIPT_09="$DOTFILES_PATH/restoration_scripts/09-gentle-ai-sync.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
 SCRIPT_12="$DOTFILES_PATH/restoration_scripts/12-agent-integrations.sh"
 SCRIPT_14="$DOTFILES_PATH/restoration_scripts/14-claude-statusline.sh"
+SCRIPT_15="$DOTFILES_PATH/restoration_scripts/15-rust.sh"
 
 tests_run=0 tests_failed=0
 pass() { tests_run=$((tests_run + 1)); printf '  ok   %s\n' "$1"; }
@@ -96,6 +97,9 @@ echo "os/linux/brew/Brewfile"
 
 untrusted=$(grep -E '^(brew|cask) "[^"]+/[^"]+"' "$BREWFILE" | grep -v 'trusted: *true')
 check "every tap-qualified brew/cask entry is trusted: true" "" "$untrusted"
+
+[ -n "$(grep -F 'brew "shellcheck"' "$BREWFILE")" ] && shellcheck_declared=yes || shellcheck_declared=no
+check "shellcheck is declared in the Brewfile" "yes" "$shellcheck_declared"
 
 unqualified_taps=""
 while IFS= read -r tap_name; do
@@ -1327,6 +1331,101 @@ contains "case g4: failure message names the rerun command" \
 	"fnm exec --using=default gentle-ai sync --agents pi" "$out_s"
 
 # ==============================================================================
+# 15-rust.sh -- installs rustup (stable, default profile) via the official
+# installer, order-independent, needing only curl.
+# ==============================================================================
+echo
+echo "15-rust.sh"
+
+mkdir -p "$SANDBOX/stub15"
+RUST_LOG="$SANDBOX/rust-install.log"
+export RUST_LOG
+
+cat > "$SANDBOX/stub15/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >>"$RUST_LOG"
+dest="" prev=""
+for arg in "$@"; do
+	[ "$prev" = "-o" ] && dest="$arg"
+	prev="$arg"
+done
+[ "${RUST_CURL_FAIL:-0}" = "1" ] && exit 1
+cat >"$dest" <<'INSTALLER'
+#!/usr/bin/env sh
+echo "installer $*" >>"$RUST_LOG"
+mkdir -p "$HOME/.cargo/bin"
+cat >"$HOME/.cargo/bin/rustup" <<'RUSTUPSTUB'
+#!/usr/bin/env bash
+exit 0
+RUSTUPSTUB
+chmod +x "$HOME/.cargo/bin/rustup"
+INSTALLER
+chmod +x "$dest"
+STUB
+chmod +x "$SANDBOX/stub15/curl"
+STUB15_PATH="$SANDBOX/stub15:/usr/bin:/bin"
+
+run15() {
+	(
+		HOME="$1"
+		PATH="$2"
+		RUSTUP_INIT_URL="${3:-https://example.test/rustup-init.sh}"
+		RUST_CURL_FAIL="${4:-0}"
+		export HOME PATH RUSTUP_INIT_URL RUST_CURL_FAIL RUST_LOG
+		. "$SCRIPT_15"
+	) >"$SANDBOX/out15" 2>&1
+	echo $?
+}
+
+# Case (h): rustup already present -> no curl call.
+HOME_15H="$SANDBOX/home15h"
+mkdir -p "$HOME_15H/.cargo/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$HOME_15H/.cargo/bin/rustup"
+chmod +x "$HOME_15H/.cargo/bin/rustup"
+: >"$RUST_LOG"
+status_15h=$(run15 "$HOME_15H" "$STUB15_PATH")
+out_15h=$(cat "$SANDBOX/out15")
+check "case h: returns success" "0" "$status_15h"
+contains "case h: reports already installed" "Rust already installed" "$out_15h"
+curl_calls_15h=$(wc -l <"$RUST_LOG" | tr -d ' ')
+check "case h: no curl call" "0" "$curl_calls_15h"
+
+# Case (i): fresh install -> curl uses the right TLS flags and RUSTUP_INIT_URL,
+# the installer gets exactly the documented args, and the sentinel .zshenv
+# (a symlink into this repository in the real machine) is left untouched.
+HOME_15I="$SANDBOX/home15i"
+mkdir -p "$HOME_15I"
+printf 'sentinel-zshenv-content\n' > "$HOME_15I/.zshenv"
+zshenv_before_i=$(sha256sum "$HOME_15I/.zshenv" | awk '{print $1}')
+: >"$RUST_LOG"
+status_15i=$(run15 "$HOME_15I" "$STUB15_PATH" "https://example.test/rustup-init.sh")
+out_15i=$(cat "$SANDBOX/out15")
+check "case i: returns success" "0" "$status_15i"
+contains "case i: reports installed" "Rust installed (rustup, stable, default profile)" "$out_15i"
+curl_call_15i=$(grep '^curl ' "$RUST_LOG")
+contains "case i: curl uses --proto =https" "--proto =https" "$curl_call_15i"
+contains "case i: curl uses --tlsv1.2" "--tlsv1.2" "$curl_call_15i"
+contains "case i: curl uses -sSf" "-sSf" "$curl_call_15i"
+contains "case i: curl fetches RUSTUP_INIT_URL" "https://example.test/rustup-init.sh" "$curl_call_15i"
+installer_call_15i=$(grep '^installer ' "$RUST_LOG")
+check "case i: the installer gets exactly the documented args" \
+	"installer -y --no-modify-path --profile default" "$installer_call_15i"
+zshenv_after_i=$(sha256sum "$HOME_15I/.zshenv" | awk '{print $1}')
+check "case i: .zshenv sentinel is left untouched" "$zshenv_before_i" "$zshenv_after_i"
+[ -x "$HOME_15I/.cargo/bin/rustup" ] && rustup_installed_i=yes || rustup_installed_i=no
+check "case i: rustup ends up installed" "yes" "$rustup_installed_i"
+
+# Case (j): download failure -> hint, status 0.
+HOME_15J="$SANDBOX/home15j"
+mkdir -p "$HOME_15J"
+: >"$RUST_LOG"
+status_15j=$(run15 "$HOME_15J" "$STUB15_PATH" "" 1)
+out_15j=$(cat "$SANDBOX/out15")
+check "case j: returns success" "0" "$status_15j"
+contains "case j: prints a failure hint" \
+	"curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile default" "$out_15j"
+
+# ==============================================================================
 # Case (h) / ordering -- 04-brew-packages.sh must sort before 06-gentle-ai-
 # state.sh, 07-node.sh, 08-pi.sh, 09-gentle-ai-sync.sh, 10-moshi-remote.sh,
 # 11-codegraph.sh, 12-agent-integrations.sh and 14-claude-statusline.sh, the
@@ -1336,7 +1435,7 @@ contains "case g4: failure message names the rerun command" \
 echo
 echo "restoration_scripts ordering"
 
-ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|09|10|11|12|14)-')
+ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|09|10|11|12|14|15)-')
 expected_order="04-brew-packages.sh
 06-gentle-ai-state.sh
 07-node.sh
@@ -1345,8 +1444,11 @@ expected_order="04-brew-packages.sh
 10-moshi-remote.sh
 11-codegraph.sh
 12-agent-integrations.sh
-14-claude-statusline.sh"
-check "04 sorts before 06, 07, 08, 09, 10, 11, 12 and 14" "$expected_order" "$ordered"
+14-claude-statusline.sh
+15-rust.sh"
+check "04 sorts before 06, 07, 08, 09, 10, 11, 12, 14 and 15" "$expected_order" "$ordered"
+[ -x "$SCRIPT_15" ] && script_15_exec=yes || script_15_exec=no
+check "15-rust.sh is executable" "yes" "$script_15_exec"
 [ -x "$SCRIPT_04" ] && script_04_exec=yes || script_04_exec=no
 check "04-brew-packages.sh is executable" "yes" "$script_04_exec"
 [ -x "$SCRIPT_08" ] && script_08_exec=yes || script_08_exec=no

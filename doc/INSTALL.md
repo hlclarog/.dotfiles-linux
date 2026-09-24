@@ -115,7 +115,10 @@ opencode by creating a fresh `opencode.json` when only gentle-ai's
 parse the `.jsonc` one. Script 12 also installs Codex's engram memory plugin
 (marketplace + `plugin add`) when `codex` and `~/.codex/config.toml` are
 present, independently of herdr. Script 14, sorting after 09, sets
-the Claude Code statusline. Restoration scripts must be committed executable
+the Claude Code statusline. Script 15, sorting last and order-independent,
+installs Rust (rustup, stable, default profile) via the official installer --
+needing only curl, not fnm or anything else the restore installs first.
+Restoration scripts must be committed executable
 (`100755`): `dot self install` silently skips any script that is not.
 
 ## 7. Apply `/etc/wsl.conf`
@@ -246,6 +249,16 @@ recovery, not automatic restore. Restart Pi to load the updated registry.
 Moshi drives this machine's agents from a mobile device: approvals, push
 notifications and a terminal over SSH/Mosh. Restoration script 10 automates what
 it can and *prints* whatever needs elevation or a human.
+
+Most of this applies to any Linux restore, WSL or not: sshd hardening,
+downloading and installing `moshi-hook` itself, and its daemon/pairing all run
+on a plain Ubuntu VM exactly as they do here. Hardening (`PasswordAuthentication
+no`) is skipped, with a message, until `~/.ssh/authorized_keys` actually has a
+key in it -- installing it earlier would lock out password login, the only
+login the machine has, with no way back in except console access. Only the
+Hyper-V inbound firewall rules below (9.2) are WSL-specific: a bare-metal or
+cloud VM has no Hyper-V layer to punch a hole in, so that step is skipped
+there.
 
 Two pairing layers exist and confusing them costs hours. They are independent:
 
@@ -822,7 +835,7 @@ Restoration scripts 10 and 12 are pinned by a regression suite, because every
 failure in this section is silent:
 
 ```bash
-./restoration_scripts/tests/agent-hooks-regression.sh     # want: 9 passed
+./restoration_scripts/tests/agent-hooks-regression.sh     # want: 30 passed
 ```
 
 **The moshi daemon runs with a PATH that cannot see Homebrew.**
@@ -903,7 +916,10 @@ points the GitHub credential helper at its absolute path, so every push and
 pull against GitHub fails without it. `mosh` because step 9.2 opens UDP
 60000-61000 for it — an open port with no binary behind it does nothing.
 `libpq` because it is keg-only and backs the Engram databases in `~/.pgpass`,
-so `psql` never lands on PATH on its own.
+so `psql` never lands on PATH on its own. `shellcheck` is declared because it
+is the linter these restoration scripts are checked against
+(`shellcheck -S warning`); it is not a runtime dependency of anything else
+here.
 
 **Run the restoration tests after touching scripts 10 or 12.** They stub every
 mutating command, so nothing on the machine changes:

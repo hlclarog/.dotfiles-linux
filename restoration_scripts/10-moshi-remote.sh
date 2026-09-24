@@ -1,47 +1,87 @@
 #!/usr/bin/env bash
 # Restore remote access to this machine from a phone or tablet through Moshi.
 #
-# Three pieces have to line up, and only two of them can be automated:
+# Four pieces have to line up, and only two of them can be automated:
 #
 #   1. sshd, hardened to keys only. Moshi and Mosh both enter over SSH, so
 #      without a listening sshd the paired keys in authorized_keys are inert.
-#   2. The moshi-hook daemon, running as a systemd user service with linger, so
+#   2. moshi-hook itself, downloaded from the official installer.
+#   3. The moshi-hook daemon, running as a systemd user service with linger, so
 #      agent hooks can reach the phone and approvals can come back.
-#   3. Inbound firewall rules at the Hyper-V layer. These need an elevated
+#   4. Inbound firewall rules at the Hyper-V layer. These need an elevated
 #      PowerShell on the Windows side, so they are printed, never executed.
 #
 # Pairing itself is deliberately NOT automated: it mints host credentials and
 # requires scanning a QR from the device.
+#
+# GENERIC LINUX vs WSL-ONLY: sections 1-3 below (sshd hardening, installing
+# moshi-hook, and its daemon/pairing) apply to ANY Linux restore, WSL or a
+# plain VM -- a non-WSL machine needs remote access exactly as much as the
+# reference one does. Only section 4 (Hyper-V inbound rules) is WSL-only: it
+# exists to punch a hole in a hypervisor firewall that a bare-metal or cloud
+# VM does not have. Darwin is out of scope entirely: sshd hardening assumes
+# systemd and the Hyper-V rules assume a Hyper-V host, neither of which
+# applies on macOS.
+#
+# WHY HARDENING WAITS FOR authorized_keys: PasswordAuthentication no is only
+# safe once a key can actually get in. Installing the drop-in before any key
+# is authorized would lock out password login -- the only login this machine
+# has -- with no way back in except console access.
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
 #
 # Covered by restoration_scripts/tests/agent-hooks-regression.sh -- run it after
 # touching any of this; the failures it catches are otherwise silent.
 
-grep -qi microsoft /proc/version 2>/dev/null || return 0
+if [ "$(uname -s)" = "Darwin" ]; then
+	echo " > Moshi remote setup is Linux-only here, skipping"
+	return 0
+fi
 
 # --- 1. sshd -----------------------------------------------------------------
 # openssh-server comes from os/linux/apt/packages.txt; this only places the
 # hardening drop-in and makes sure the service is enabled.
-moshi_sshd_src="$DOTFILES_PATH/os/linux/ssh/99-moshi.conf"
-moshi_sshd_dst="/etc/ssh/sshd_config.d/99-moshi.conf"
+moshi_sshd_src="$DOTFILES_PATH/os/linux/ssh/00-moshi.conf"
+moshi_sshd_dst="/etc/ssh/sshd_config.d/00-moshi.conf"
+moshi_sshd_legacy="/etc/ssh/sshd_config.d/99-moshi.conf"
+moshi_authorized_keys="$HOME/.ssh/authorized_keys"
+
+# sshd keeps the first value it reads for each keyword and reads
+# sshd_config.d/*.conf in lexical order, so the effective value is only
+# trustworthy straight from sshd itself.
+moshi_verify_sshd_effective() {
+	moshi_effective=$(sudo -n sshd -T 2>/dev/null | grep -i '^passwordauthentication ')
+	if [ "$moshi_effective" = "passwordauthentication no" ]; then
+		echo " > sshd effective: passwordauthentication no"
+	else
+		echo " > WARNING: sshd still allows passwords; check /etc/ssh/sshd_config.d/ for an earlier PasswordAuthentication line"
+	fi
+}
 
 if ! command -v sshd >/dev/null 2>&1; then
 	echo " > openssh-server is not installed yet; run the apt restore first"
+elif [ ! -s "$moshi_authorized_keys" ]; then
+	echo " > No ~/.ssh/authorized_keys yet; sshd hardening skipped so password login stays available until a key is installed"
 elif [ -f "$moshi_sshd_dst" ] && cmp -s "$moshi_sshd_src" "$moshi_sshd_dst"; then
 	echo " > sshd hardening already matches the repository"
+	sudo -n true 2>/dev/null && moshi_verify_sshd_effective
 elif ! sudo -n true 2>/dev/null; then
 	# A restoration script runs unattended, so it must never block on a password.
 	echo " > sshd hardening needs updating but sudo needs a password here."
 	echo " > Run this by hand:"
 	echo "     sudo install -m 644 \"$moshi_sshd_src\" \"$moshi_sshd_dst\""
+	echo "     sudo rm -f \"$moshi_sshd_legacy\""
 	echo "     sudo systemctl enable --now ssh && sudo systemctl restart ssh"
+	echo "     sudo sshd -T | grep -i passwordauthentication"
 else
 	sudo install -D -m 644 "$moshi_sshd_src" "$moshi_sshd_dst"
+	sudo rm -f "$moshi_sshd_legacy"
 	sudo systemctl enable --now ssh >/dev/null 2>&1
 	sudo systemctl restart ssh >/dev/null 2>&1
 	echo " > sshd hardening installed and service restarted"
+	moshi_verify_sshd_effective
 fi
+unset -f moshi_verify_sshd_effective
 
 # Verify with ss, not `systemctl is-active ssh`: Ubuntu 24.04 activates sshd
 # through ssh.socket, so the service unit can read inactive while the port is
@@ -52,10 +92,34 @@ else
 	echo " > WARNING: nothing is listening on :22"
 fi
 
-# --- 2. moshi-hook daemon ----------------------------------------------------
+# --- 2. moshi-hook itself ------------------------------------------------------
+# The official installer places the binary under ~/.local/bin plus a `moshi`
+# symlink; ~/.config/moshi/config.toml already comes from this repository, so
+# there is nothing left for the installer's interactive first-run settings
+# prompt to ask -- MOSHI_HOOK_SKIP_FIRST_RUN=1 skips it.
+if ! command -v moshi-hook >/dev/null 2>&1 && [ ! -x "$HOME/.local/bin/moshi-hook" ]; then
+	moshi_tmp=$(mktemp)
+	if curl -fsSL "${MOSHI_INSTALL_URL:-https://getmoshi.app/install.sh}" -o "$moshi_tmp"; then
+		MOSHI_HOOK_SKIP_FIRST_RUN=1 sh "$moshi_tmp" </dev/null
+	fi
+	rm -f "$moshi_tmp"
+	unset moshi_tmp
+	case ":$PATH:" in
+	*":$HOME/.local/bin:"*) ;;
+	*) PATH="$HOME/.local/bin:$PATH" ;;
+	esac
+	if command -v moshi-hook >/dev/null 2>&1; then
+		echo " > moshi-hook installed"
+	else
+		echo " > moshi-hook install failed; rerun: curl -fsSL https://getmoshi.app/install.sh | sh"
+	fi
+fi
+
+# --- 3. moshi-hook daemon ----------------------------------------------------
 if ! command -v moshi-hook >/dev/null 2>&1; then
-	echo " > moshi-hook is not installed; see the Notion runbook to install and pair"
-elif ! moshi-hook status 2>/dev/null | grep -q '^status:.*paired'; then
+	: # not installed and the install above already explained why
+# Match the whole word: `status: unpaired` also contains "paired".
+elif ! moshi-hook status 2>/dev/null | grep -qE '^status:[[:space:]]+paired([[:space:]]|$)'; then
 	echo " > moshi-hook is installed but NOT paired. Pair it from the device:"
 	echo "     moshi-hook pair --token <token from the app> --store file"
 	echo "     moshi-hook service install"
@@ -97,11 +161,13 @@ else
 	echo " > moshi-hook daemon running, linger enabled"
 fi
 
-# --- 3. Hyper-V inbound rules (manual, needs elevation) ----------------------
+# --- 4. Hyper-V inbound rules (manual, needs elevation, WSL only) ------------
 # Mirrored networking still blocks inbound at the Hyper-V firewall
 # (DefaultInboundAction: Block). Two narrow rules are enough; do NOT flip
-# DefaultInboundAction to Allow, that opens every port on the VM.
-cat <<'MSG'
+# DefaultInboundAction to Allow, that opens every port on the VM. A bare-metal
+# or cloud VM has no Hyper-V layer at all, so this section only fires on WSL.
+if grep -qi microsoft "${MOSHI_PROC_VERSION_FILE:-/proc/version}" 2>/dev/null; then
+	cat <<'MSG'
  > Inbound firewall rules cannot be set from here. In an ELEVATED PowerShell:
      $wsl = '{40E0AC32-46A5-438A-A0B2-2B479E8F2E90}'
      New-NetFirewallHyperVRule -Name "WSL-SSH" -DisplayName "WSL SSH" `
@@ -110,8 +176,9 @@ cat <<'MSG'
        -Direction Inbound -VMCreatorId $wsl -Protocol UDP -LocalPorts 60000-61000 -Action Allow
    If that GUID errors, get the right one from Get-NetFirewallHyperVVMCreator.
 MSG
+fi
 
-# --- 4. One daemon, and only one --------------------------------------------
+# --- 5. One daemon, and only one --------------------------------------------
 # The Moshi app tells you to `pkill` the daemon and relaunch it with
 # `moshi serve &`. That advice assumes a hand-started process. Here systemd owns
 # it, so the kill trips Restart=on-failure while the manual serve adds a second
@@ -136,4 +203,4 @@ cat <<'MSG'
      systemctl --user restart moshi-hook.service
 MSG
 
-unset moshi_sshd_src moshi_sshd_dst moshi_daemons moshi_unit moshi_extra_path moshi_bin moshi_dir
+unset moshi_sshd_src moshi_sshd_dst moshi_sshd_legacy moshi_authorized_keys moshi_effective moshi_daemons moshi_unit moshi_extra_path moshi_bin moshi_dir

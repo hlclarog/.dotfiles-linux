@@ -37,6 +37,8 @@ brew "neovim"
 brew "powerlevel10k"
 # Search tool like grep and The Silver Searcher
 brew "ripgrep"
+# Shell script analysis tool
+brew "shellcheck"
 # Cross-shell prompt for astronauts
 brew "starship"
 # Shell extension to navigate your filesystem faster
