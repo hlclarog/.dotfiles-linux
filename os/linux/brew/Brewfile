@@ -52,27 +52,34 @@ brew "zsh-syntax-highlighting"
 # Interactive TUI installer for Gentleman.Dots development environment
 brew "gentleman-programming/tap/gentleman-dots", trusted: true
 # Ultra-fast parser for declarative command-line options, required by dotly
-brew "denisidoro/tools/docpars"
+brew "denisidoro/tools/docpars", trusted: true
 # Lightweight and flexible command-line JSON processor
 # Required by the Claude Code statusline and restoration script 06.
 brew "jq"
 # Persistent memory for AI coding agents
-brew "gentleman-programming/tap/engram"
+brew "gentleman-programming/tap/engram", trusted: true
 # Agent orchestration: SDD, judgment-day, review contracts
-brew "gentleman-programming/tap/gentle-ai"
+brew "gentleman-programming/tap/gentle-ai", trusted: true
 # Gentleman git assistant
-brew "gentleman-programming/tap/gga"
+brew "gentleman-programming/tap/gga", trusted: true
 # opencode AI coding agent
-brew "anomalyco/tap/opencode"
+brew "anomalyco/tap/opencode", trusted: true
 
 # The AI CLIs. These are casks, which `brew bundle dump --brews`
 # silently omits - that omission is why a restore came up without them.
+#
+# Homebrew 7 refuses to load ANY entry from an untrusted third-party tap. Its
+# bundle code only ever applies `trusted: true` to a FULLY QUALIFIED name
+# (Utils.full_name? in Library/Homebrew/bundle/{brew,cask}.rb), so a bare
+# `cask "openai"` is never recognized as belonging to the openai/tools tap and
+# the trust flag is silently ignored. Every entry from a third-party tap must
+# therefore be written as tap/name AND marked trusted: true.
 # Claude Code CLI
 cask "claude-code"
 # OpenAI Codex CLI
 cask "codex"
 # OpenAI CLI
-cask "openai"
+cask "openai/tools/openai", trusted: true
 
 # Runtime libraries that nothing else in this file depends on, kept declared
 # so `brew bundle dump` round-trips cleanly instead of re-adding them every

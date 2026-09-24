@@ -65,12 +65,20 @@ export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 ```
 
 `package import` runs `brew bundle install`, so it also brings the taps and the
-three casks: Claude Code, Codex and the OpenAI CLI.
+three casks: Claude Code, Codex and the OpenAI CLI. Homebrew 7 refuses any
+entry from an untrusted third-party tap unless it is written fully qualified
+(`tap/name`) and marked `trusted: true` — a bare `cask "openai"` is silently
+ignored by the trust flag even with the tap declared, so every third-party
+entry in the Brewfile follows that pattern.
 
 `self install` creates the 14 symlinks and runs the restoration scripts: the
 Windows drive link, `/etc/wsl.conf`, the projects skeleton, the Claude Code
 statusline, the gentle-ai selections, the Node pin, the Windows-side
-`.wslconfig` (script 09) and Moshi remote access (script 10).
+`.wslconfig` (script 09) and Moshi remote access (script 10). Script 11 also
+installs CodeGraph itself, running `npm i -g @colbymchenry/codegraph` through
+fnm's default Node the first time it finds the wrapper symlinked but no shim
+installed yet. Restoration scripts must be committed executable (`100755`):
+`dot self install` silently skips any script that is not.
 
 ## 7. Apply `/etc/wsl.conf`
 

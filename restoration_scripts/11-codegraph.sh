@@ -32,14 +32,36 @@ fi
 codegraph_reminder="$HOME/.local/bin/codegraph-session-reminder"
 codegraph_matcher="startup|resume|clear"
 
-# --- 1. The wrapper has to resolve before anything else is worth doing -------
-# `codegraph` on PATH must be the wrapper from tools/codegraph, never the npm
-# shim. See the gotcha in doc/INSTALL.md: the shim lives under the fnm-scoped
-# global prefix and its shebang is `#!/usr/bin/env node`, so it dies both in a
-# shell on another Node version and in any context with no Node at all.
-if ! command -v codegraph >/dev/null 2>&1; then
-	echo " > codegraph is not on PATH yet; run \`dot self install\` again after"
-	echo " >   npm i -g @colbymchenry/codegraph"
+# --- 1. Resolve the wrapper, then install the npm shim it needs -------------
+# This used to gate the whole script on `command -v codegraph`, but that
+# depends on PATH state the install does not guarantee: ~/.local/bin (where
+# the wrapper is symlinked) is not necessarily on PATH yet, and each
+# restoration script runs in its own subshell (`. "$script" | log::file ...`),
+# so 08-node.sh's `eval "$(fnm env)"` never carries into this one either. The
+# net effect was that codegraph was never actually installed by the restore.
+# The wrapper and the npm shim it needs (see the gotcha in doc/INSTALL.md: the
+# shim lives under the fnm-scoped global prefix) are checked by exact path
+# instead, and the shim is installed through fnm directly when missing.
+codegraph_wrapper="$HOME/.local/bin/codegraph"
+if [ ! -x "$codegraph_wrapper" ]; then
+	echo " > codegraph symlinks are not applied yet; run \`dot self install\` again"
+	return 0
+fi
+
+codegraph_shim="$HOME/.local/share/fnm/aliases/default/bin/codegraph"
+if [ ! -x "$codegraph_shim" ]; then
+	if command -v fnm >/dev/null 2>&1; then
+		echo " > Installing codegraph under fnm's default Node"
+		fnm exec --using=default npm i -g @colbymchenry/codegraph
+	else
+		echo " > fnm is not on PATH yet; run \`dot self install\` again once Node is installed"
+		return 0
+	fi
+fi
+
+if [ ! -x "$codegraph_shim" ]; then
+	echo " > codegraph install did not produce a shim at $codegraph_shim; run manually:"
+	echo " >   fnm exec --using=default npm i -g @colbymchenry/codegraph"
 	return 0
 fi
 
@@ -147,5 +169,5 @@ fi
 
 echo " > verify with: claude mcp list   (expect: codegraph ✔ Connected)"
 
-unset codegraph_reminder codegraph_matcher claude_settings codex_hooks
-unset claude_json opencode_json codex_config tmp
+unset codegraph_reminder codegraph_matcher codegraph_wrapper codegraph_shim
+unset claude_settings codex_hooks claude_json opencode_json codex_config tmp

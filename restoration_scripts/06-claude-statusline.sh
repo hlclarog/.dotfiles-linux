@@ -5,6 +5,13 @@
 # symlinked from here — that would fight the application for ownership of the
 # file. Only the statusLine key is set; everything else is left untouched.
 #
+# On a fresh machine the file does not exist yet -- Claude Code only writes it
+# on first launch, and script 12 creates one later in the restore -- so this
+# used to silently skip via `[ -f ... ] || return 0`, leaving the statusline
+# unconfigured forever (11-codegraph.sh's Claude hook has the same guard, for
+# the same reason). A missing file is now treated as an empty `{}` settings
+# file and merged exactly like an existing one.
+#
 # The script itself IS symlinked, through symlinks/conf.yaml, so a git pull
 # updates it.
 #
@@ -27,7 +34,10 @@ if ! command -v jq >/dev/null 2>&1; then
 	return 0
 fi
 
-[ -f "$claude_settings" ] || return 0
+if [ ! -f "$claude_settings" ]; then
+	mkdir -p "$HOME/.claude"
+	echo '{}' >"$claude_settings"
+fi
 
 claude_current="$(jq -r '[.statusLine.command // "", .statusLine.refreshInterval // 0] | @tsv' \
 	"$claude_settings" 2>/dev/null)"
