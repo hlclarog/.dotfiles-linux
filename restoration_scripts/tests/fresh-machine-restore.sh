@@ -61,6 +61,7 @@ set -u
 DOTFILES_PATH="${DOTFILES_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 export DOTFILES_PATH
 BREWFILE="$DOTFILES_PATH/os/linux/brew/Brewfile"
+SCRIPT_00="$DOTFILES_PATH/restoration_scripts/00-default-shell.sh"
 SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
 SCRIPT_06="$DOTFILES_PATH/restoration_scripts/06-claude-statusline.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
@@ -345,6 +346,161 @@ check "missing Brewfile: returns success" "0" "$status_i"
 # the Brewfile is even checked -- but no tap/trust/bundle call should follow.
 calls_i=$(grep -vc '^shellenv$' "$BREW_LOG")
 check "missing Brewfile: no tap/trust/bundle call is made" "0" "$calls_i"
+
+# ==============================================================================
+# Bug 5 -- 00-default-shell.sh must fix the invoking user's login shell,
+# since modules/dotly/scripts/self/install:34 runs `sudo chsh -s "$(command -v
+# zsh)"` with no username and so only ever changes root's shell. It must also
+# undo the side effect: a root shell left pointing at a user-owned Homebrew
+# zsh prefix.
+# ==============================================================================
+echo
+echo "00-default-shell.sh"
+
+SUDO_LOG="$SANDBOX/sudo00.log"
+GETENT_LOG="$SANDBOX/getent00.log"
+export SUDO_LOG GETENT_LOG
+
+mkdir -p "$SANDBOX/stub-00" "$SANDBOX/empty-bin"
+
+cat >"$SANDBOX/stub-00/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$SUDO_LOG"
+exec "$@"
+STUB
+chmod +x "$SANDBOX/stub-00/sudo"
+
+cat >"$SANDBOX/stub-00/chsh" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+chmod +x "$SANDBOX/stub-00/chsh"
+
+cat >"$SANDBOX/stub-00/getent" <<'STUB'
+#!/usr/bin/env bash
+echo "$*" >>"$GETENT_LOG"
+if [ "$2" = root ]; then
+	printf 'root:x:0:0:root:/root:%s\n' "${ROOT_SHELL:-/bin/bash}"
+else
+	printf '%s:x:1000:1000:User,,,:/home/%s:%s\n' "$2" "$2" "${USER_SHELL:-/bin/bash}"
+fi
+STUB
+chmod +x "$SANDBOX/stub-00/getent"
+
+cat >"$SANDBOX/stub-00/tee" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = -a ]; then
+	cat >>"$2"
+else
+	cat >"$1"
+fi
+STUB
+chmod +x "$SANDBOX/stub-00/tee"
+
+printf '#!/usr/bin/env bash\nexit 0\n' >"$SANDBOX/stub-00/zsh"
+chmod +x "$SANDBOX/stub-00/zsh"
+
+STUB_ZSH="$SANDBOX/stub-00/zsh"
+WITH_STUB_PATH="$SANDBOX/stub-00:/usr/bin:/bin"
+NO_ZSH_PATH="$SANDBOX/empty-bin"
+
+run00() {
+	(
+		USER="$1"
+		PATH="$2"
+		SHELLS_FILE="$3"
+		USER_SHELL="$4"
+		ROOT_SHELL="$5"
+		export USER PATH SHELLS_FILE USER_SHELL ROOT_SHELL
+		. "$SCRIPT_00"
+	) >"$SANDBOX/out00" 2>&1
+	echo $?
+}
+
+# Case (a): the invoking user is on bash and root's shell is a Homebrew zsh
+# -> chsh the user to the resolved zsh, then reset root to /bin/bash.
+SHELLS_FILE_A="$SANDBOX/shells-a"
+printf '/bin/sh\n/bin/bash\n%s\n' "$STUB_ZSH" >"$SHELLS_FILE_A"
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_a=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" /bin/bash /home/linuxbrew/.linuxbrew/bin/zsh)
+out_a=$(cat "$SANDBOX/out00")
+check "case a: returns success" "0" "$status_a"
+expected_sudo_a="chsh -s $STUB_ZSH hclaro
+chsh -s /bin/bash root"
+check "case a: chsh for the user then chsh for root, in that order" "$expected_sudo_a" "$(cat "$SUDO_LOG")"
+contains "case a: reports the user's new shell" "Login shell for hclaro set to $STUB_ZSH" "$out_a"
+
+# Case (b): the invoking user is already on the resolved zsh and root is
+# already bash -> no chsh calls at all.
+SHELLS_FILE_B="$SANDBOX/shells-b"
+printf '/bin/sh\n/bin/bash\n%s\n' "$STUB_ZSH" >"$SHELLS_FILE_B"
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_b=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_B" "$STUB_ZSH" /bin/bash)
+out_b=$(cat "$SANDBOX/out00")
+check "case b: returns success" "0" "$status_b"
+check "case b: no chsh or tee calls" "" "$(cat "$SUDO_LOG")"
+contains "case b: reports login shell already zsh" "Login shell already zsh" "$out_b"
+
+# Case (c): the resolved zsh is missing from /etc/shells -> it is appended
+# BEFORE chsh runs.
+SHELLS_FILE_C="$SANDBOX/shells-c"
+printf '/bin/sh\n/bin/bash\n' >"$SHELLS_FILE_C"
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_c=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_C" /bin/bash /bin/bash)
+out_c=$(cat "$SANDBOX/out00")
+check "case c: returns success" "0" "$status_c"
+expected_sudo_c="tee -a $SHELLS_FILE_C
+chsh -s $STUB_ZSH hclaro"
+check "case c: appends to the shells file before chsh" "$expected_sudo_c" "$(cat "$SUDO_LOG")"
+check "case c: the zsh path ends up in the shells file" "$STUB_ZSH" "$(tail -n1 "$SHELLS_FILE_C")"
+
+# Case (d): no zsh on PATH at all -> skip message, status 0, nothing called.
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_d=$(run00 hclaro "$NO_ZSH_PATH" "$SANDBOX/shells-d" /bin/bash /bin/bash)
+out_d=$(cat "$SANDBOX/out00")
+contains "case d: prints a skip message" "zsh is not installed" "$out_d"
+check "case d: returns success" "0" "$status_d"
+check "case d: no sudo calls" "" "$(cat "$SUDO_LOG")"
+check "case d: getent is never called" "" "$(cat "$GETENT_LOG")"
+
+# Case (e): 00 must sort before 04 and be committed executable.
+ordered_00=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(00|04)-')
+expected_order_00="00-default-shell.sh
+04-brew-packages.sh"
+check "case e: 00 sorts before 04-brew-packages.sh" "$expected_order_00" "$ordered_00"
+[ -x "$SCRIPT_00" ] && script_00_exec=yes || script_00_exec=no
+check "case e: 00-default-shell.sh is executable" "yes" "$script_00_exec"
+
+# Case (f)/(g): macOS has no getent, so the login shell must come from dscl.
+# Otherwise every `dot self install` on a Mac would prompt for sudo to chsh a
+# user who is already on zsh. Root is never touched on Darwin.
+mkdir -p "$SANDBOX/stub-00-mac"
+printf '#!/usr/bin/env bash\necho Darwin\n' >"$SANDBOX/stub-00-mac/uname"
+cat >"$SANDBOX/stub-00-mac/dscl" <<'STUB'
+#!/usr/bin/env bash
+echo "UserShell: ${USER_SHELL:-/bin/bash}"
+STUB
+chmod +x "$SANDBOX/stub-00-mac/uname" "$SANDBOX/stub-00-mac/dscl"
+MAC_PATH="$SANDBOX/stub-00-mac:$SANDBOX/stub-00:/usr/bin:/bin"
+
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_f=$(run00 hclaro "$MAC_PATH" "$SHELLS_FILE_B" "$STUB_ZSH" /bin/bash)
+out_f=$(cat "$SANDBOX/out00")
+check "case f: macOS, already zsh: returns success" "0" "$status_f"
+check "case f: macOS, already zsh: no sudo calls" "" "$(cat "$SUDO_LOG")"
+check "case f: macOS: getent is never called" "" "$(cat "$GETENT_LOG")"
+contains "case f: macOS: reports login shell already zsh" "Login shell already zsh" "$out_f"
+
+: >"$SUDO_LOG"
+status_g=$(run00 hclaro "$MAC_PATH" "$SHELLS_FILE_B" /bin/bash /home/linuxbrew/.linuxbrew/bin/zsh)
+check "case g: macOS, user on bash: returns success" "0" "$status_g"
+check "case g: macOS, user on bash: chsh the user only, never root" \
+	"chsh -s $STUB_ZSH hclaro" "$(cat "$SUDO_LOG")"
 
 # ==============================================================================
 # 04-brew-packages.sh must sort before 06/08/11/13 and be committed executable

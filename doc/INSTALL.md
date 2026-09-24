@@ -64,6 +64,14 @@ export DOTLY_PATH="$DOTFILES_PATH/modules/dotly"
 "$DOTLY_PATH/bin/dot" package import   # apt list (sudo); its Brewfile half is a no-op now
 ```
 
+Dotly's own `self install` has a bug: it runs `sudo chsh -s "$(command -v
+zsh)"` with no username (`modules/dotly/scripts/self/install:34`), so under
+`sudo` it changes **root's** shell instead of yours, and your login shell
+stays bash — zsh-only config such as the starship prompt, atuin and herdr
+autostart never loads. Restoration script 00 (sorting first) fixes the
+invoking user's login shell instead and resets root's back to `/bin/bash` if
+it was left pointing at a Homebrew zsh; it may prompt for your sudo password.
+
 Restoration script 04 installs `os/linux/brew/Brewfile` itself, as the first
 restoration script, before scripts that depend on `jq` or `fnm` run. It also
 pre-trusts every `trusted: true` tap, formula and cask before calling
