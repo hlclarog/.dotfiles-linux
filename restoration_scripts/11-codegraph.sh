@@ -132,6 +132,7 @@ if [ -f "$claude_json" ]; then
 fi
 
 opencode_json="$HOME/.config/opencode/opencode.json"
+opencode_dir="$HOME/.config/opencode"
 if [ -f "$opencode_json" ]; then
 	if jq -e '.mcp.codegraph' "$opencode_json" >/dev/null 2>&1; then
 		echo " > opencode already registers the codegraph MCP server"
@@ -146,6 +147,24 @@ if [ -f "$opencode_json" ]; then
 			echo " > opencode MCP server registered"
 		rm -f "$tmp"
 	fi
+elif [ -d "$opencode_dir" ]; then
+	# gentle-ai 3.7 only ever writes opencode.jsonc (JSON-with-comments, which
+	# jq cannot parse), so a machine that never had an opencode.json before
+	# would otherwise never get codegraph registered. opencode loads and
+	# merges BOTH opencode.json and opencode.jsonc from this directory, so a
+	# fresh opencode.json carrying only the MCP entry is enough, and
+	# opencode.jsonc is left untouched.
+	jq -n '{
+	      "$schema": "https://opencode.ai/config.json",
+	      mcp: {
+	        codegraph: {
+	          type: "local",
+	          command: ["codegraph", "serve", "--mcp"],
+	          enabled: true
+	        }
+	      }
+	    }' >"$opencode_json" &&
+		echo " > opencode MCP server registered (new opencode.json, merged with gentle-ai's opencode.jsonc)"
 fi
 
 # TOML has no jq, and the table is a flat append, so a grep guard is enough.
@@ -170,4 +189,4 @@ fi
 echo " > verify with: claude mcp list   (expect: codegraph ✔ Connected)"
 
 unset codegraph_reminder codegraph_matcher codegraph_wrapper codegraph_shim
-unset claude_settings codex_hooks claude_json opencode_json codex_config tmp
+unset claude_settings codex_hooks claude_json opencode_json opencode_dir codex_config tmp

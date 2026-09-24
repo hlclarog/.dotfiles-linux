@@ -109,7 +109,12 @@ access (script 10). Script 09 then runs `gentle-ai sync` from the state script
 06 restored, and also syncs Pi's own agent assets once script 08 installed it
 -- see step 8. Script 11 also installs CodeGraph itself, running `npm i -g
 @colbymchenry/codegraph` through fnm's default Node the first time it finds the
-wrapper symlinked but no shim installed yet. Script 14, sorting after 09, sets
+wrapper symlinked but no shim installed yet, and registers its MCP server with
+opencode by creating a fresh `opencode.json` when only gentle-ai's
+`opencode.jsonc` exists yet, since opencode merges both files but jq cannot
+parse the `.jsonc` one. Script 12 also installs Codex's engram memory plugin
+(marketplace + `plugin add`) when `codex` and `~/.codex/config.toml` are
+present, independently of herdr. Script 14, sorting after 09, sets
 the Claude Code statusline. Restoration scripts must be committed executable
 (`100755`): `dot self install` silently skips any script that is not.
 

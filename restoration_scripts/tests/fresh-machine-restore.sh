@@ -66,6 +66,7 @@ SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
 SCRIPT_08="$DOTFILES_PATH/restoration_scripts/08-pi.sh"
 SCRIPT_09="$DOTFILES_PATH/restoration_scripts/09-gentle-ai-sync.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
+SCRIPT_12="$DOTFILES_PATH/restoration_scripts/12-agent-integrations.sh"
 SCRIPT_14="$DOTFILES_PATH/restoration_scripts/14-claude-statusline.sh"
 
 tests_run=0 tests_failed=0
@@ -235,6 +236,202 @@ contains "wrapper absent: prints a symlink message" "symlinks are not applied" "
 check "wrapper absent: returns success" "0" "$status_e"
 fnm_calls_4=$(wc -l <"$FNM_LOG" | tr -d ' ')
 check "wrapper absent: fnm is never invoked" "0" "$fnm_calls_4"
+
+# ==============================================================================
+# Fix 1 -- 11-codegraph.sh must register the codegraph MCP server in a fresh
+# opencode.json when gentle-ai only wrote opencode.jsonc (JSON with comments,
+# which jq cannot parse), merging rather than replacing it.
+# ==============================================================================
+echo
+echo "11-codegraph.sh -- opencode MCP registration"
+
+setup_wrapper_and_shim() {
+	setup_wrapper "$1"
+	mkdir -p "$1/.local/share/fnm/aliases/default/bin"
+	printf '#!/usr/bin/env bash\nexit 0\n' >"$1/.local/share/fnm/aliases/default/bin/codegraph"
+	chmod +x "$1/.local/share/fnm/aliases/default/bin/codegraph"
+}
+
+expected_opencode_json=$(jq -S -n '{"$schema":"https://opencode.ai/config.json","mcp":{"codegraph":{"type":"local","command":["codegraph","serve","--mcp"],"enabled":true}}}')
+
+# Case: only opencode.jsonc present -> opencode.json is created with exactly
+# the codegraph MCP entry, and the .jsonc is left byte-identical.
+HOME_OC1="$SANDBOX/home-oc1"
+mkdir -p "$HOME_OC1/.config/opencode"
+setup_wrapper_and_shim "$HOME_OC1"
+printf '{\n  // a comment jq cannot parse\n  "theme": "dark"\n}\n' >"$HOME_OC1/.config/opencode/opencode.jsonc"
+jsonc_before=$(sha256sum "$HOME_OC1/.config/opencode/opencode.jsonc" | awk '{print $1}')
+status_oc1=$(run11 "$HOME_OC1" "$NO_FNM_PATH")
+out_oc1=$(cat "$SANDBOX/out")
+check "only .jsonc present: returns success" "0" "$status_oc1"
+contains "only .jsonc present: reports opencode.json created, merged with jsonc" \
+	"opencode MCP server registered (new opencode.json, merged with gentle-ai's opencode.jsonc)" "$out_oc1"
+opencode_json_content=$(jq -S '.' "$HOME_OC1/.config/opencode/opencode.json" 2>/dev/null)
+check "only .jsonc present: opencode.json has exactly the expected content" \
+	"$expected_opencode_json" "$opencode_json_content"
+jsonc_after=$(sha256sum "$HOME_OC1/.config/opencode/opencode.jsonc" | awk '{print $1}')
+check "only .jsonc present: opencode.jsonc is left byte-identical" "$jsonc_before" "$jsonc_after"
+
+# Case: rerun -> already registers, file unchanged.
+json_before_oc1=$(sha256sum "$HOME_OC1/.config/opencode/opencode.json" | awk '{print $1}')
+status_oc1b=$(run11 "$HOME_OC1" "$NO_FNM_PATH")
+out_oc1b=$(cat "$SANDBOX/out")
+check "rerun: returns success" "0" "$status_oc1b"
+contains "rerun: reports already registers" "opencode already registers the codegraph MCP server" "$out_oc1b"
+json_after_oc1=$(sha256sum "$HOME_OC1/.config/opencode/opencode.json" | awk '{print $1}')
+check "rerun: opencode.json unchanged" "$json_before_oc1" "$json_after_oc1"
+
+# Case: existing opencode.json without codegraph -> key added, other keys
+# preserved (existing behaviour).
+HOME_OC2="$SANDBOX/home-oc2"
+mkdir -p "$HOME_OC2/.config/opencode"
+setup_wrapper_and_shim "$HOME_OC2"
+printf '{"theme": "light", "mcp": {"context7": {"type": "local", "command": ["context7"], "enabled": true}}}' \
+	>"$HOME_OC2/.config/opencode/opencode.json"
+status_oc2=$(run11 "$HOME_OC2" "$NO_FNM_PATH")
+check "existing opencode.json: returns success" "0" "$status_oc2"
+theme_kept=$(jq -r '.theme' "$HOME_OC2/.config/opencode/opencode.json")
+context7_kept=$(jq -r '.mcp.context7.type' "$HOME_OC2/.config/opencode/opencode.json")
+jq -e '.mcp.codegraph' "$HOME_OC2/.config/opencode/opencode.json" >/dev/null 2>&1 && codegraph_added=yes || codegraph_added=no
+check "existing opencode.json: other keys preserved, codegraph key added" \
+	"light|local|yes" "$theme_kept|$context7_kept|$codegraph_added"
+
+# Case: no ~/.config/opencode at all -> nothing created.
+HOME_OC3="$SANDBOX/home-oc3"
+mkdir -p "$HOME_OC3"
+setup_wrapper_and_shim "$HOME_OC3"
+status_oc3=$(run11 "$HOME_OC3" "$NO_FNM_PATH")
+check "no opencode dir: returns success" "0" "$status_oc3"
+[ -e "$HOME_OC3/.config/opencode" ] && opencode_dir_created=yes || opencode_dir_created=no
+check "no opencode dir: nothing is created" "no" "$opencode_dir_created"
+
+# ==============================================================================
+# Fix 2 -- 12-agent-integrations.sh must install Codex's engram plugin,
+# independently of herdr, before the herdr-gated section of the script.
+# ==============================================================================
+echo
+echo "12-agent-integrations.sh -- Codex engram plugin"
+
+CODEX_LOG="$SANDBOX/codex12.log"
+export CODEX_LOG
+mkdir -p "$SANDBOX/stub-12" "$SANDBOX/stub-12-nocodex"
+
+cat >"$SANDBOX/stub-12/codex" <<'STUB'
+#!/usr/bin/env bash
+echo "codex $*" >>"$CODEX_LOG"
+if [ "$1" = plugin ] && [ "$2" = marketplace ] && [ "$3" = add ]; then
+	if [ "${CODEX_MARKETPLACE_EXIT:-0}" != 0 ]; then
+		exit "$CODEX_MARKETPLACE_EXIT"
+	fi
+	printf '\n[marketplaces.engram]\nsource_type = "git"\nsource = "https://github.com/Gentleman-Programming/engram.git"\n' >>"$HOME/.codex/config.toml"
+	exit 0
+fi
+if [ "$1" = plugin ] && [ "$2" = add ]; then
+	printf '\n[plugins."engram@engram"]\nenabled = true\n' >>"$HOME/.codex/config.toml"
+	exit 0
+fi
+exit 0
+STUB
+chmod +x "$SANDBOX/stub-12/codex"
+
+cat >"$SANDBOX/stub-12/timeout" <<'STUB'
+#!/usr/bin/env bash
+echo "timeout $*" >>"$CODEX_LOG"
+shift
+exec "$@"
+STUB
+chmod +x "$SANDBOX/stub-12/timeout"
+ln -s "$SANDBOX/stub-12/timeout" "$SANDBOX/stub-12-nocodex/timeout"
+
+WITH_CODEX_PATH="$SANDBOX/stub-12:/usr/bin:/bin"
+NO_CODEX_PATH="$SANDBOX/stub-12-nocodex:/usr/bin:/bin"
+
+run12() {
+	(
+		HOME="$1"
+		PATH="$2"
+		CODEX_MARKETPLACE_EXIT="${3:-0}"
+		export HOME PATH CODEX_MARKETPLACE_EXIT CODEX_LOG
+		. "$SCRIPT_12"
+	) >"$SANDBOX/out12" 2>&1
+	echo $?
+}
+
+# Case e: fresh config.toml -> both commands, in that order, exact args.
+HOME_CX1="$SANDBOX/home-cx1"
+mkdir -p "$HOME_CX1/.codex"
+: >"$HOME_CX1/.codex/config.toml"
+: >"$CODEX_LOG"
+status_cx1=$(run12 "$HOME_CX1" "$WITH_CODEX_PATH")
+out_cx1=$(cat "$SANDBOX/out12")
+check "case e: returns success" "0" "$status_cx1"
+codex_calls_cx1=$(grep '^codex ' "$CODEX_LOG")
+expected_calls_cx1="codex plugin marketplace add https://github.com/Gentleman-Programming/engram.git
+codex plugin add engram@engram"
+check "case e: codex gets marketplace add then plugin add, in that order" \
+	"$expected_calls_cx1" "$codex_calls_cx1"
+timeout_calls_cx1=$(grep -c '^timeout 120 codex ' "$CODEX_LOG")
+check "case e: both calls go through timeout 120" "2" "$timeout_calls_cx1"
+contains "case e: reports the plugin installed" "Codex engram plugin installed" "$out_cx1"
+
+# Case f: marketplace present but plugin absent -> only plugin add runs.
+HOME_CX2="$SANDBOX/home-cx2"
+mkdir -p "$HOME_CX2/.codex"
+printf '[marketplaces.engram]\nsource_type = "git"\nsource = "https://github.com/Gentleman-Programming/engram.git"\n' \
+	>"$HOME_CX2/.codex/config.toml"
+: >"$CODEX_LOG"
+status_cx2=$(run12 "$HOME_CX2" "$WITH_CODEX_PATH")
+check "case f: returns success" "0" "$status_cx2"
+codex_calls_cx2=$(grep '^codex ' "$CODEX_LOG")
+check "case f: only plugin add runs" "codex plugin add engram@engram" "$codex_calls_cx2"
+
+# Case g: plugin already present -> no codex plugin calls at all.
+HOME_CX3="$SANDBOX/home-cx3"
+mkdir -p "$HOME_CX3/.codex"
+printf '[plugins."engram@engram"]\nenabled = true\n' >"$HOME_CX3/.codex/config.toml"
+: >"$CODEX_LOG"
+status_cx3=$(run12 "$HOME_CX3" "$WITH_CODEX_PATH")
+out_cx3=$(cat "$SANDBOX/out12")
+check "case g: returns success" "0" "$status_cx3"
+codex_calls_cx3=$(wc -l <"$CODEX_LOG" | tr -d ' ')
+check "case g: no codex calls at all" "0" "$codex_calls_cx3"
+contains "case g: reports already installed" "Codex engram plugin already installed" "$out_cx3"
+
+# Case h1: codex missing -> nothing invoked.
+HOME_CX4="$SANDBOX/home-cx4"
+mkdir -p "$HOME_CX4/.codex"
+: >"$HOME_CX4/.codex/config.toml"
+: >"$CODEX_LOG"
+status_cx4=$(run12 "$HOME_CX4" "$NO_CODEX_PATH")
+check "case h1: codex missing: returns success" "0" "$status_cx4"
+calls_cx4=$(wc -l <"$CODEX_LOG" | tr -d ' ')
+check "case h1: codex missing: nothing is invoked" "0" "$calls_cx4"
+
+# Case h2: config.toml missing -> nothing invoked.
+HOME_CX5="$SANDBOX/home-cx5"
+mkdir -p "$HOME_CX5"
+: >"$CODEX_LOG"
+status_cx5=$(run12 "$HOME_CX5" "$WITH_CODEX_PATH")
+check "case h2: config.toml missing: returns success" "0" "$status_cx5"
+calls_cx5=$(wc -l <"$CODEX_LOG" | tr -d ' ')
+check "case h2: config.toml missing: nothing is invoked" "0" "$calls_cx5"
+
+# Case i: marketplace add fails -> failure hint, no plugin add, script still
+# returns 0 and the rest of its output is intact.
+HOME_CX6="$SANDBOX/home-cx6"
+mkdir -p "$HOME_CX6/.codex"
+: >"$HOME_CX6/.codex/config.toml"
+: >"$CODEX_LOG"
+status_cx6=$(run12 "$HOME_CX6" "$WITH_CODEX_PATH" 1)
+out_cx6=$(cat "$SANDBOX/out12")
+check "case i: still returns success" "0" "$status_cx6"
+contains "case i: prints the failure hint" \
+	"Codex engram plugin install failed; rerun: codex plugin marketplace add https://github.com/Gentleman-Programming/engram.git && codex plugin add engram@engram" \
+	"$out_cx6"
+codex_calls_cx6=$(grep '^codex ' "$CODEX_LOG")
+check "case i: only the marketplace add call is made" \
+	"codex plugin marketplace add https://github.com/Gentleman-Programming/engram.git" "$codex_calls_cx6"
+contains "case i: the rest of the script's output is intact" "herdr is not installed" "$out_cx6"
 
 # ==============================================================================
 # Bug 4 -- 04-brew-packages.sh must install the Brewfile itself, pre-trusting

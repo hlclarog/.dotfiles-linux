@@ -13,9 +13,9 @@
 #   * `codegraph install` wrote hooks but registered the MCP server nowhere.
 #   * brew installing herdr 0.9.0 staled moshi's claude hooks for a week.
 #   * installing the herdr codex integration staled moshi's codex hook instantly.
-#   * pi went stale the same way and stayed that way: step 1 creates
+#   * pi went stale the same way and stayed that way: step 2 creates
 #     ~/.pi/agent/extensions/ for herdr, moshi's extension is not written
-#     there, and the step 2 guard below used to check only the other three.
+#     there, and the step 3 guard below used to check only the other three.
 #
 # So: herdr first, moshi LAST, then restart the moshi daemon so it reloads the
 # hook config it just wrote.
@@ -28,12 +28,56 @@
 # Covered by restoration_scripts/tests/agent-hooks-regression.sh -- run it after
 # touching any of this; the failures it catches are otherwise silent.
 
+# --- 1. Codex: engram memory plugin -----------------------------------------
+# Deliberately independent of herdr below: it must still run on a machine
+# that has Codex but not herdr. `codex plugin add` is the only way to get
+# engram's memory skill and its session hooks (session-start,
+# user-prompt-submit, post-compaction, subagent-stop, session-end) onto
+# Codex -- nothing else in the restore writes them. Both timeout branches
+# mirror 09-gentle-ai-sync.sh: an unquoted "$timeout_cmd codex ..." would rely
+# on word splitting, which zsh (this file's possible caller shell, since it
+# is sourced) does not do by default.
+codex_config_toml="$HOME/.codex/config.toml"
+if command -v codex >/dev/null 2>&1 && [ -f "$codex_config_toml" ]; then
+	if grep -q '^\[plugins\."engram@engram"\]' "$codex_config_toml"; then
+		echo " > Codex engram plugin already installed"
+	else
+		codex_engram_ok=1
+		if ! grep -q '^\[marketplaces\.engram\]' "$codex_config_toml"; then
+			if command -v timeout >/dev/null 2>&1; then
+				(cd "$HOME" && timeout 120 codex plugin marketplace add \
+					https://github.com/Gentleman-Programming/engram.git </dev/null) ||
+					codex_engram_ok=0
+			else
+				(cd "$HOME" && codex plugin marketplace add \
+					https://github.com/Gentleman-Programming/engram.git </dev/null) ||
+					codex_engram_ok=0
+			fi
+		fi
+		if [ "$codex_engram_ok" = 1 ]; then
+			if command -v timeout >/dev/null 2>&1; then
+				(cd "$HOME" && timeout 120 codex plugin add engram@engram </dev/null) ||
+					codex_engram_ok=0
+			else
+				(cd "$HOME" && codex plugin add engram@engram </dev/null) ||
+					codex_engram_ok=0
+			fi
+		fi
+		if [ "$codex_engram_ok" = 1 ]; then
+			echo " > Codex engram plugin installed"
+		else
+			echo " > Codex engram plugin install failed; rerun: codex plugin marketplace add https://github.com/Gentleman-Programming/engram.git && codex plugin add engram@engram"
+		fi
+	fi
+fi
+unset codex_config_toml codex_engram_ok
+
 command -v herdr >/dev/null 2>&1 || {
 	echo " > herdr is not installed; skipping agent integrations"
 	return 0
 }
 
-# --- 1. herdr agent-state integrations --------------------------------------
+# --- 2. herdr agent-state integrations --------------------------------------
 # Only targets whose agent actually exists here. herdr knows 17; installing one
 # for an absent agent just litters a directory nothing reads.
 #
@@ -58,9 +102,9 @@ for agent_int_pair in \
 	fi
 done
 
-# --- 2. moshi-hook, LAST ----------------------------------------------------
+# --- 3. moshi-hook, LAST ----------------------------------------------------
 # Reinstalling is cheap and idempotent, and it is the only way to undo the
-# staling that step 1 causes. Do not reorder these two blocks.
+# staling that step 2 causes. Do not reorder these two blocks.
 if command -v moshi-hook >/dev/null 2>&1; then
 	if moshi-hook status 2>/dev/null | grep -qE '^\s+(claude|codex|opencode|pi)\s+stale'; then
 		moshi-hook install >/dev/null 2>&1 &&
