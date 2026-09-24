@@ -165,9 +165,10 @@ files: gentle-pi only applies the saved models to installed agents at
 session_start, and the first run's install-sdd creates those agents after
 that point in the same session, so they lack model/thinking frontmatter until
 a second session's session_start reapplies the saved models to them.
-The **only** manual step left afterward is logging into Pi;
-`~/.pi/agent/auth.json` is never restored. Switch the active profile from
-inside Pi with `/gentle:profiles`.
+Logging into Pi is one of several manual steps left afterward --
+`~/.pi/agent/auth.json` is never restored -- see "After the restore: logins
+and keys" below for a guided walkthrough of all of them. Switch the active
+profile from inside Pi with `/gentle:profiles`.
 
 Script 09 already did this during step 6, once `gentle-ai`, `opencode` and
 `fnm` were on PATH (script 04) and `~/.gentle-ai/state.json` -- the preset, the
@@ -524,6 +525,44 @@ second simply never receives a connection.
 
 `~/.engram/cloud.json` carries the cloud server URL and the sync token. It is
 NOT in the repository — see "Not in the repository, on purpose" below.
+
+---
+
+## After the restore: logins and keys
+
+`dot self install` restores everything it safely can unattended, but a
+handful of steps genuinely need a human: browser logins, device pairing and
+anything gated behind a sudo password. `scripts/post-restore-secrets` is the
+only manual step left -- a single guided walkthrough that checks each of
+them, explains what to do, and offers to run it in the foreground so you can
+complete the login yourself.
+
+```bash
+cd "$HOME/.dotfiles"
+./scripts/post-restore-secrets           # interactive, step by step
+./scripts/post-restore-secrets --check   # status only, no prompts; exits 0 once nothing is pending
+```
+
+Run a single step with `POST_RESTORE_ONLY=<step-id>`, for example
+`POST_RESTORE_ONLY=tailscale ./scripts/post-restore-secrets`.
+
+| Step id | What it covers |
+|---|---|
+| `gh` | GitHub CLI device login (`gh auth login`) |
+| `ssh-keys` | Generates any SSH key referenced by `ssh/config` that is still missing, and offers to register it with `gh` or prints it to add by hand |
+| `pi` | Pi's OpenAI (ChatGPT) login |
+| `claude` | Claude Code login, then registers the CodeGraph MCP server if it is still missing |
+| `codex` | Codex device login |
+| `opencode` | opencode login |
+| `engram` | Engram cloud sync credentials (optional, skip with Enter) |
+| `tailscale` | Installs Tailscale and prompts for `tailscale up` (Linux only, skipped on WSL and macOS) |
+| `sshd` | Installs the `00-moshi.conf` sshd hardening, skipped with a warning until `~/.ssh/authorized_keys` actually has a key in it |
+| `shell` | Sets the login shell to zsh (`sudo chsh`) |
+| `moshi` | Optional: prints the Moshi pairing commands if `moshi-hook` is installed but not yet paired |
+
+Every command it runs is either a status check or executed in the foreground
+with your input -- nothing here logs in or applies sudo-gated changes on its
+own.
 
 ---
 
