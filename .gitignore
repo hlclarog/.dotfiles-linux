@@ -9,3 +9,7 @@ config/nvim/.luarc.json
 # Written by gentle-ai's skill-registry refresh. Generated output, not
 # configuration -- the same reason ~/.claude and ~/.config/opencode stay out.
 .atl/
+
+# Dotly's restorer installs Zim inside the linked zsh config. Generated,
+# not configuration.
+shell/zsh/.zim/

@@ -1,5 +1,5 @@
 # Windows-side WSL2 settings. Lives at %USERPROFILE%\.wslconfig, NOT inside the
-# distribution — installed by restoration_scripts/09-wslconfig.sh.
+# distribution — installed by restoration_scripts/01-wslconfig.sh.
 #
 # networkingMode = mirrored makes WSL share the Windows network interfaces
 # instead of sitting behind NAT. Without it eth0 gets a private 172.x address

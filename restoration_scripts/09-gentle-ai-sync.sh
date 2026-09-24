@@ -84,5 +84,18 @@ else
 	unset gentle_ai_sync_status
 fi
 
+# 08-pi.sh installs Pi before this script runs; once it is runnable, sync its
+# agent assets (the context7 MCP entry and ~/.pi/gentle-ai/persona.json) the
+# same way, preserving any existing engram entry.
+if [ -x "$HOME/.pi/agent/bin/pi" ] || command -v pi >/dev/null 2>&1; then
+	if fnm exec --using=default gentle-ai sync --agents pi; then
+		echo " > gentle-ai Pi assets synced"
+	else
+		gentle_ai_pi_sync_status=$?
+		echo " > gentle-ai Pi asset sync failed (exit $gentle_ai_pi_sync_status); rerun: fnm exec --using=default gentle-ai sync --agents pi"
+		unset gentle_ai_pi_sync_status
+	fi
+fi
+
 unset gentle_ai_bin
 return 0

@@ -1,0 +1,16 @@
+{
+  "askClaude": {
+    "enabled": true,
+    "defaultMode": "read",
+    "allowFullMode": true,
+    "defaultIsolated": false,
+    "appendSkills": true
+  },
+  "provider": {
+    "plan": "max",
+    "longContextExtraUsage": false,
+    "strictMcpConfig": true,
+    "autoMemoryEnabled": false,
+    "pathToClaudeCodeExecutable": "@HOME@/.local/bin/claude"
+  }
+}

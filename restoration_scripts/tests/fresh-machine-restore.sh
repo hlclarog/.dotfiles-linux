@@ -63,7 +63,8 @@ export DOTFILES_PATH
 BREWFILE="$DOTFILES_PATH/os/linux/brew/Brewfile"
 SCRIPT_00="$DOTFILES_PATH/restoration_scripts/00-default-shell.sh"
 SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
-SCRIPT_08="$DOTFILES_PATH/restoration_scripts/08-gentle-ai-sync.sh"
+SCRIPT_08="$DOTFILES_PATH/restoration_scripts/08-pi.sh"
+SCRIPT_09="$DOTFILES_PATH/restoration_scripts/09-gentle-ai-sync.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
 SCRIPT_14="$DOTFILES_PATH/restoration_scripts/14-claude-statusline.sh"
 
@@ -504,31 +505,313 @@ check "case g: macOS, user on bash: chsh the user only, never root" \
 	"chsh -s $STUB_ZSH hclaro" "$(cat "$SUDO_LOG")"
 
 # ==============================================================================
-# 08-gentle-ai-sync.sh -- nothing in the restore ever ran gentle-ai to turn the
+# 08-pi.sh -- installs Pi itself and seeds it to match the reference machine.
+# ==============================================================================
+echo
+echo "08-pi.sh"
+
+PI_LOG="$SANDBOX/pi-install.log"
+export PI_LOG
+mkdir -p "$SANDBOX/stub-08pi" "$SANDBOX/stub-08pi-nosetsid"
+
+cat >"$SANDBOX/stub-08pi/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >>"$PI_LOG"
+dest=""
+prev=""
+for arg in "$@"; do
+	[ "$prev" = "-o" ] && dest="$arg"
+	prev="$arg"
+done
+[ "${CURL_FAIL:-0}" = "1" ] && exit 1
+cat >"$dest" <<'INSTALLER'
+#!/usr/bin/env sh
+echo "installer $*" >>"$PI_LOG"
+printf 'path-head:%s\n' "$(echo "$PATH" | cut -d: -f1)" >>"$PI_LOG"
+if [ -t 0 ]; then
+	echo "stdin-tty:yes" >>"$PI_LOG"
+else
+	echo "stdin-tty:no" >>"$PI_LOG"
+fi
+mkdir -p "$HOME/.pi/agent/bin" "$HOME/bin"
+cat >"$HOME/.pi/agent/bin/pi" <<'PISTUB'
+#!/usr/bin/env bash
+echo "pi $*" >>"$PI_LOG"
+if [ "$1" = "install" ]; then
+	name="${2#npm:}"
+	case "$name" in
+	@*)
+		rest="${name#@}"
+		pkg="@${rest%@*}"
+		;;
+	*)
+		pkg="${name%%@*}"
+		;;
+	esac
+	mkdir -p "$HOME/.pi/agent/npm/node_modules/$pkg"
+fi
+exit "${PI_EXIT:-0}"
+PISTUB
+chmod +x "$HOME/.pi/agent/bin/pi"
+ln -sf "$HOME/.pi/agent/bin/pi" "$HOME/bin/pi"
+INSTALLER
+chmod +x "$dest"
+STUB
+chmod +x "$SANDBOX/stub-08pi/curl"
+
+cat >"$SANDBOX/stub-08pi/fnm" <<'STUB'
+#!/usr/bin/env bash
+echo "fnm $*" >>"$PI_LOG"
+if [ "$1" = exec ] && [ "$2" = "--using=default" ]; then
+	shift 2
+	exec "$@"
+fi
+exit 0
+STUB
+
+cat >"$SANDBOX/stub-08pi/setsid" <<'STUB'
+#!/usr/bin/env bash
+echo "setsid $*" >>"$PI_LOG"
+[ "$1" = "-w" ] && shift
+exec "$@"
+STUB
+
+cat >"$SANDBOX/stub-08pi/timeout" <<'STUB'
+#!/usr/bin/env bash
+echo "timeout $*" >>"$PI_LOG"
+shift
+exec "$@"
+STUB
+
+cat >"$SANDBOX/stub-08pi/brew" <<'STUB'
+#!/usr/bin/env bash
+echo "brew $*" >>"$PI_LOG"
+if [ "$1" = "--prefix" ]; then
+	echo "${SANDBOX_BREW_PREFIX:-/sandbox/brew}"
+	exit 0
+fi
+exit 0
+STUB
+
+chmod +x "$SANDBOX/stub-08pi/fnm" "$SANDBOX/stub-08pi/setsid" \
+	"$SANDBOX/stub-08pi/timeout" "$SANDBOX/stub-08pi/brew"
+ln -s "$(command -v jq)" "$SANDBOX/stub-08pi/jq"
+
+for _bin in curl fnm timeout brew jq; do
+	ln -s "$SANDBOX/stub-08pi/$_bin" "$SANDBOX/stub-08pi-nosetsid/$_bin"
+done
+unset _bin
+
+BASE_PI_PATH="$SANDBOX/stub-08pi:/usr/bin:/bin"
+NO_SETSID_PI_PATH="$SANDBOX/stub-08pi-nosetsid:/usr/bin:/bin"
+
+run08pi() {
+	(
+		HOME="$1"
+		PATH="$2"
+		PI_INSTALL_URL="${3:-https://example.test/install.sh}"
+		BREW_PREFIX_CANDIDATES="${4:-/no/such/brew-a /no/such/brew-b}"
+		CURL_FAIL="${5:-0}"
+		PI_EXIT="${6:-0}"
+		export HOME PATH PI_INSTALL_URL BREW_PREFIX_CANDIDATES CURL_FAIL PI_EXIT PI_LOG DOTFILES_PATH
+		. "$SCRIPT_08"
+	) >"$SANDBOX/out08pi" 2>&1
+	echo $?
+}
+
+# Case (a): fresh machine.
+HOME_PI_A="$SANDBOX/home-pi-a"
+mkdir -p "$HOME_PI_A"
+printf 'sentinel-zshrc-content\n' >"$HOME_PI_A/.zshrc"
+zshrc_before=$(sha256sum "$HOME_PI_A/.zshrc" | awk '{print $1}')
+: >"$PI_LOG"
+status_pi_a=$(run08pi "$HOME_PI_A" "$BASE_PI_PATH")
+out_pi_a=$(cat "$SANDBOX/out08pi")
+check "case a: returns success" "0" "$status_pi_a"
+
+zshrc_after=$(sha256sum "$HOME_PI_A/.zshrc" | awk '{print $1}')
+check "case a: .zshrc is left untouched" "$zshrc_before" "$zshrc_after"
+
+curl_call=$(grep '^curl ' "$PI_LOG")
+contains "case a: curl fetches PI_INSTALL_URL" "https://example.test/install.sh" "$curl_call"
+setsid_call=$(grep '^setsid ' "$PI_LOG")
+contains "case a: setsid runs the installer with -w" "setsid -w sh " "$setsid_call"
+path_head=$(grep '^path-head:' "$PI_LOG" | sed 's/^path-head://')
+check "case a: \$HOME/bin is first on PATH for the installer" "$HOME_PI_A/bin" "$path_head"
+
+for _f in settings subagents claude-bridge mcp; do
+	_dst="$HOME_PI_A/.pi/agent/$_f.json"
+	[ -f "$_dst" ] && _present=yes || _present=no
+	check "case a: $_f.json is seeded" "yes" "$_present"
+	_perm=$(stat -c '%a' "$_dst" 2>/dev/null)
+	check "case a: $_f.json mode is 600" "600" "$_perm"
+	_placeholder=$(grep -c -E '@HOME@|@BREW_PREFIX@' "$_dst")
+	check "case a: $_f.json has no leftover placeholder" "0" "$_placeholder"
+done
+unset _f _dst _present _perm _placeholder
+
+claude_bridge_path=$(jq -r '.provider.pathToClaudeCodeExecutable' "$HOME_PI_A/.pi/agent/claude-bridge.json")
+check "case a: claude-bridge.json has \$HOME substituted" "$HOME_PI_A/.local/bin/claude" "$claude_bridge_path"
+mcp_engram_cmd=$(jq -r '.mcpServers.engram.command' "$HOME_PI_A/.pi/agent/mcp.json")
+check "case a: mcp.json has the brew prefix substituted" "/sandbox/brew/bin/engram" "$mcp_engram_cmd"
+
+profiles_file="$HOME_PI_A/.pi/gentle-ai/profiles.json"
+active=$(jq -r '.active' "$profiles_file")
+check "case a: profiles.json active is claude-full.autogen" "claude-full.autogen" "$active"
+key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
+check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
+profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
+check "case a: profiles.json has exactly 4 profiles" "4" "$profile_count"
+claude_match=$(jq -S '.profiles | del(."open-ai-full.autogen")' "$profiles_file")
+claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
+check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"
+openai_match=$(jq -S '.profiles["open-ai-full.autogen"]' "$profiles_file")
+openai_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/open-ai-full.autogen.json")
+check "case a: open-ai-full.autogen matches the repo snapshot" "$openai_expected" "$openai_match"
+gentle_ai_dir_perm=$(stat -c '%a' "$HOME_PI_A/.pi/gentle-ai")
+check "case a: ~/.pi/gentle-ai mode is 700" "700" "$gentle_ai_dir_perm"
+
+models_file="$HOME_PI_A/.pi/gentle-ai/models.json"
+models_match=$(jq -S '.' "$models_file")
+active_profile_obj=$(jq -S '.profiles["claude-full.autogen"]' "$profiles_file")
+check "case a: models.json equals the active profile" "$active_profile_obj" "$models_match"
+
+install_calls=$(grep '^pi install ' "$PI_LOG")
+expected_installs=$(jq -r '.packages[] | "pi install " + .' "$DOTFILES_PATH/config/pi/agent/settings.json")
+check "case a: pi install runs once per package with the exact sources" "$expected_installs" "$install_calls"
+
+sdd_line=$(grep -n 'pi -p /gentle:install-sdd' "$PI_LOG" | tail -n1 | cut -d: -f1)
+last_install_line=$(grep -n '^pi install ' "$PI_LOG" | tail -n1 | cut -d: -f1)
+if [ -n "$sdd_line" ] && [ -n "$last_install_line" ] && [ "$sdd_line" -gt "$last_install_line" ]; then
+	sdd_order_ok=yes
+else
+	sdd_order_ok=no
+fi
+check "case a: the SDD install runs after every package install" "yes" "$sdd_order_ok"
+contains "case a: reports the SDD assets installed" "Pi agent assets installed" "$out_pi_a"
+
+# Case (b): rerun -- Pi and the seed files already exist.
+HOME_PI_B="$SANDBOX/home-pi-b"
+mkdir -p "$HOME_PI_B/.pi/agent/bin" "$HOME_PI_B/.pi/agent/npm/node_modules"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_PI_B/.pi/agent/bin/pi"
+chmod +x "$HOME_PI_B/.pi/agent/bin/pi"
+for _f in settings subagents claude-bridge mcp; do
+	printf 'sentinel-%s\n' "$_f" >"$HOME_PI_B/.pi/agent/$_f.json"
+done
+for _pkg in gentle-pi gentle-engram pi-claude-bridge pi-mcp-adapter; do
+	mkdir -p "$HOME_PI_B/.pi/agent/npm/node_modules/$_pkg"
+done
+unset _f _pkg
+: >"$PI_LOG"
+status_pi_b=$(run08pi "$HOME_PI_B" "$BASE_PI_PATH")
+check "case b: returns success" "0" "$status_pi_b"
+curl_calls_b=$(grep -c '^curl ' "$PI_LOG")
+check "case b: curl is not called" "0" "$curl_calls_b"
+install_calls_b=$(grep -c '^pi install ' "$PI_LOG")
+check "case b: no packages are installed again" "0" "$install_calls_b"
+for _f in settings subagents claude-bridge mcp; do
+	_content=$(cat "$HOME_PI_B/.pi/agent/$_f.json")
+	check "case b: $_f.json sentinel is left untouched" "sentinel-$_f" "$_content"
+done
+unset _f _content
+
+# Case (c): fnm missing -> skip message mentions 07-node.sh, nothing invoked.
+HOME_PI_C="$SANDBOX/home-pi-c"
+mkdir -p "$HOME_PI_C"
+: >"$PI_LOG"
+status_pi_c=$(run08pi "$HOME_PI_C" "$SANDBOX/empty-bin")
+out_pi_c=$(cat "$SANDBOX/out08pi")
+check "case c: returns success" "0" "$status_pi_c"
+contains "case c: skip message mentions 07-node.sh" "07-node.sh" "$out_pi_c"
+calls_pi_c=$(wc -l <"$PI_LOG" | tr -d ' ')
+check "case c: nothing is invoked" "0" "$calls_pi_c"
+
+# Case (d): the installer download fails -> failure hint, status 0, no installs.
+HOME_PI_D="$SANDBOX/home-pi-d"
+mkdir -p "$HOME_PI_D"
+: >"$PI_LOG"
+status_pi_d=$(run08pi "$HOME_PI_D" "$BASE_PI_PATH" "" "" 1)
+out_pi_d=$(cat "$SANDBOX/out08pi")
+check "case d: returns success" "0" "$status_pi_d"
+contains "case d: prints a failure hint" "curl -fsSL https://pi.dev/install.sh | sh" "$out_pi_d"
+install_calls_d=$(grep -c '^pi install ' "$PI_LOG")
+check "case d: no packages are installed" "0" "$install_calls_d"
+
+# Case (e): setsid absent -> the python3 fallback still detaches the installer.
+HOME_PI_E="$SANDBOX/home-pi-e"
+mkdir -p "$HOME_PI_E"
+: >"$PI_LOG"
+status_pi_e=$(run08pi "$HOME_PI_E" "$NO_SETSID_PI_PATH")
+check "case e: returns success" "0" "$status_pi_e"
+stdin_tty_line=$(grep '^stdin-tty:' "$PI_LOG")
+check "case e: the installer still ran detached (stdin not a tty)" "stdin-tty:no" "$stdin_tty_line"
+[ -x "$HOME_PI_E/.pi/agent/bin/pi" ] && pi_installed_e=yes || pi_installed_e=no
+check "case e: Pi ends up installed via the python3 fallback" "yes" "$pi_installed_e"
+setsid_calls_e=$(grep -c '^setsid ' "$PI_LOG")
+check "case e: setsid is never invoked" "0" "$setsid_calls_e"
+
+# Case (f): an existing profiles.json lacking open-ai-full.autogen is left
+# untouched, with a hint to run scripts/restore-pi-openai-profile.
+HOME_PI_F="$SANDBOX/home-pi-f"
+mkdir -p "$HOME_PI_F/.pi/agent/bin" "$HOME_PI_F/.pi/gentle-ai"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_PI_F/.pi/agent/bin/pi"
+chmod +x "$HOME_PI_F/.pi/agent/bin/pi"
+cat >"$HOME_PI_F/.pi/gentle-ai/profiles.json" <<'JSON'
+{"kind":"gentle-pi.agent_model_profiles","version":1,"profiles":{"current":{}},"active":"current"}
+JSON
+profiles_before_f=$(cat "$HOME_PI_F/.pi/gentle-ai/profiles.json")
+: >"$PI_LOG"
+status_pi_f=$(run08pi "$HOME_PI_F" "$BASE_PI_PATH")
+out_pi_f=$(cat "$SANDBOX/out08pi")
+check "case f: returns success" "0" "$status_pi_f"
+profiles_after_f=$(cat "$HOME_PI_F/.pi/gentle-ai/profiles.json")
+check "case f: the existing profiles.json is left untouched" "$profiles_before_f" "$profiles_after_f"
+contains "case f: hint mentions scripts/restore-pi-openai-profile" "scripts/restore-pi-openai-profile" "$out_pi_f"
+
+# ==============================================================================
+# config/pi/agent seed files -- no leftover /home/ literal, valid JSON, and
+# settings.json declares exactly the 4 pinned packages.
+# ==============================================================================
+echo
+echo "config/pi/agent seed files"
+
+for _f in settings subagents claude-bridge mcp; do
+	_seed="$DOTFILES_PATH/config/pi/agent/$_f.json"
+	_no_home=$(grep -c '/home/' "$_seed")
+	check "config/pi/agent/$_f.json has no /home/ literal" "0" "$_no_home"
+	jq empty "$_seed" >/dev/null 2>&1 && _valid=yes || _valid=no
+	check "config/pi/agent/$_f.json is valid JSON" "yes" "$_valid"
+done
+unset _f _seed _no_home _valid
+pkg_count=$(jq '.packages | length' "$DOTFILES_PATH/config/pi/agent/settings.json")
+check "settings.json packages list has exactly 4 entries" "4" "$pkg_count"
+
+# ==============================================================================
+# 09-gentle-ai-sync.sh -- nothing in the restore ever ran gentle-ai to turn the
 # state 06-gentle-ai-state.sh seeds into the actual agent assets, and gentle-ai
 # sync fails on opencode's cold first start (measured 97s bootstrap) unless
 # something warms it up first.
 # ==============================================================================
 echo
-echo "08-gentle-ai-sync.sh"
+echo "09-gentle-ai-sync.sh"
 
 SYNC_LOG="$SANDBOX/gentle-ai-sync.log"
 export SYNC_LOG
-mkdir -p "$SANDBOX/stub-08"
+mkdir -p "$SANDBOX/stub-09"
 
-cat >"$SANDBOX/stub-08/gentle-ai" <<'STUB'
+cat >"$SANDBOX/stub-09/gentle-ai" <<'STUB'
 #!/usr/bin/env bash
 echo "$(basename "$0") $*" >>"$SYNC_LOG"
 exit "${GENTLE_AI_SYNC_EXIT:-0}"
 STUB
 
-cat >"$SANDBOX/stub-08/opencode" <<'STUB'
+cat >"$SANDBOX/stub-09/opencode" <<'STUB'
 #!/usr/bin/env bash
 echo "$(basename "$0") $*" >>"$SYNC_LOG"
 exit 0
 STUB
 
-cat >"$SANDBOX/stub-08/fnm" <<'STUB'
+cat >"$SANDBOX/stub-09/fnm" <<'STUB'
 #!/usr/bin/env bash
 echo "$(basename "$0") $*" >>"$SYNC_LOG"
 if [ "$1" = exec ] && [ "$2" = "--using=default" ]; then
@@ -538,44 +821,44 @@ fi
 exit 0
 STUB
 
-cat >"$SANDBOX/stub-08/timeout" <<'STUB'
+cat >"$SANDBOX/stub-09/timeout" <<'STUB'
 #!/usr/bin/env bash
 echo "$(basename "$0") $*" >>"$SYNC_LOG"
 shift
 exec "$@"
 STUB
 
-chmod +x "$SANDBOX/stub-08/gentle-ai" "$SANDBOX/stub-08/opencode" \
-	"$SANDBOX/stub-08/fnm" "$SANDBOX/stub-08/timeout"
+chmod +x "$SANDBOX/stub-09/gentle-ai" "$SANDBOX/stub-09/opencode" \
+	"$SANDBOX/stub-09/fnm" "$SANDBOX/stub-09/timeout"
 
-FULL_PATH_08="$SANDBOX/stub-08:/usr/bin:/bin"
+FULL_PATH_09="$SANDBOX/stub-09:/usr/bin:/bin"
 
-mkdir -p "$SANDBOX/stub-08-no-opencode"
-ln -s "$SANDBOX/stub-08/gentle-ai" "$SANDBOX/stub-08-no-opencode/gentle-ai"
-ln -s "$SANDBOX/stub-08/fnm" "$SANDBOX/stub-08-no-opencode/fnm"
-ln -s "$SANDBOX/stub-08/timeout" "$SANDBOX/stub-08-no-opencode/timeout"
-NO_OPENCODE_PATH_08="$SANDBOX/stub-08-no-opencode:/usr/bin:/bin"
+mkdir -p "$SANDBOX/stub-09-no-opencode"
+ln -s "$SANDBOX/stub-09/gentle-ai" "$SANDBOX/stub-09-no-opencode/gentle-ai"
+ln -s "$SANDBOX/stub-09/fnm" "$SANDBOX/stub-09-no-opencode/fnm"
+ln -s "$SANDBOX/stub-09/timeout" "$SANDBOX/stub-09-no-opencode/timeout"
+NO_OPENCODE_PATH_09="$SANDBOX/stub-09-no-opencode:/usr/bin:/bin"
 
-mkdir -p "$SANDBOX/stub-08-no-gentle-ai"
-ln -s "$SANDBOX/stub-08/opencode" "$SANDBOX/stub-08-no-gentle-ai/opencode"
-ln -s "$SANDBOX/stub-08/fnm" "$SANDBOX/stub-08-no-gentle-ai/fnm"
-ln -s "$SANDBOX/stub-08/timeout" "$SANDBOX/stub-08-no-gentle-ai/timeout"
-NO_GENTLE_AI_PATH_08="$SANDBOX/stub-08-no-gentle-ai:/usr/bin:/bin"
+mkdir -p "$SANDBOX/stub-09-no-gentle-ai"
+ln -s "$SANDBOX/stub-09/opencode" "$SANDBOX/stub-09-no-gentle-ai/opencode"
+ln -s "$SANDBOX/stub-09/fnm" "$SANDBOX/stub-09-no-gentle-ai/fnm"
+ln -s "$SANDBOX/stub-09/timeout" "$SANDBOX/stub-09-no-gentle-ai/timeout"
+NO_GENTLE_AI_PATH_09="$SANDBOX/stub-09-no-gentle-ai:/usr/bin:/bin"
 
-mkdir -p "$SANDBOX/stub-08-no-fnm"
-ln -s "$SANDBOX/stub-08/gentle-ai" "$SANDBOX/stub-08-no-fnm/gentle-ai"
-ln -s "$SANDBOX/stub-08/opencode" "$SANDBOX/stub-08-no-fnm/opencode"
-NO_FNM_PATH_08="$SANDBOX/stub-08-no-fnm:/usr/bin:/bin"
+mkdir -p "$SANDBOX/stub-09-no-fnm"
+ln -s "$SANDBOX/stub-09/gentle-ai" "$SANDBOX/stub-09-no-fnm/gentle-ai"
+ln -s "$SANDBOX/stub-09/opencode" "$SANDBOX/stub-09-no-fnm/opencode"
+NO_FNM_PATH_09="$SANDBOX/stub-09-no-fnm:/usr/bin:/bin"
 
-run08() {
+run09() {
 	(
 		HOME="$1"
 		PATH="$2"
 		GENTLE_AI_SYNC_EXIT="${3:-0}"
 		GENTLE_AI_CANDIDATES="${4-/no/such/gentle-ai-a /no/such/gentle-ai-b}"
 		export HOME PATH GENTLE_AI_SYNC_EXIT GENTLE_AI_CANDIDATES SYNC_LOG
-		. "$SCRIPT_08"
-	) >"$SANDBOX/out08" 2>&1
+		. "$SCRIPT_09"
+	) >"$SANDBOX/out09" 2>&1
 	echo $?
 }
 
@@ -585,8 +868,8 @@ HOME_J="$SANDBOX/home-j"
 mkdir -p "$HOME_J/.gentle-ai"
 : >"$HOME_J/.gentle-ai/state.json"
 : >"$SYNC_LOG"
-status_j=$(run08 "$HOME_J" "$FULL_PATH_08")
-out_j=$(cat "$SANDBOX/out08")
+status_j=$(run09 "$HOME_J" "$FULL_PATH_09")
+out_j=$(cat "$SANDBOX/out09")
 check "case a: returns success" "0" "$status_j"
 contains "case a: reports the sync succeeded" "gentle-ai agent assets synced" "$out_j"
 fnm_call=$(grep '^fnm ' "$SYNC_LOG")
@@ -607,8 +890,8 @@ HOME_K="$SANDBOX/home-k"
 mkdir -p "$HOME_K/.gentle-ai"
 : >"$HOME_K/.gentle-ai/state.json"
 : >"$SYNC_LOG"
-status_k=$(run08 "$HOME_K" "$NO_OPENCODE_PATH_08")
-out_k=$(cat "$SANDBOX/out08")
+status_k=$(run09 "$HOME_K" "$NO_OPENCODE_PATH_09")
+out_k=$(cat "$SANDBOX/out09")
 check "case b: returns success" "0" "$status_k"
 warmup_calls_k=$(grep -c 'opencode debug config' "$SYNC_LOG")
 check "case b: no opencode warm-up call is made" "0" "$warmup_calls_k"
@@ -618,8 +901,8 @@ contains "case b: sync still runs" "gentle-ai agent assets synced" "$out_k"
 HOME_L="$SANDBOX/home-l"
 mkdir -p "$HOME_L"
 : >"$SYNC_LOG"
-status_l=$(run08 "$HOME_L" "$FULL_PATH_08")
-out_l=$(cat "$SANDBOX/out08")
+status_l=$(run09 "$HOME_L" "$FULL_PATH_09")
+out_l=$(cat "$SANDBOX/out09")
 check "case c: returns success" "0" "$status_l"
 contains "case c: prints a skip message" "No gentle-ai state restored" "$out_l"
 calls_l=$(wc -l <"$SYNC_LOG" | tr -d ' ')
@@ -631,8 +914,8 @@ HOME_M="$SANDBOX/home-m"
 mkdir -p "$HOME_M/.gentle-ai"
 : >"$HOME_M/.gentle-ai/state.json"
 : >"$SYNC_LOG"
-status_m=$(run08 "$HOME_M" "$NO_GENTLE_AI_PATH_08")
-out_m=$(cat "$SANDBOX/out08")
+status_m=$(run09 "$HOME_M" "$NO_GENTLE_AI_PATH_09")
+out_m=$(cat "$SANDBOX/out09")
 check "case d: returns success" "0" "$status_m"
 contains "case d: prints a skip message" "gentle-ai is not installed" "$out_m"
 calls_m=$(wc -l <"$SYNC_LOG" | tr -d ' ')
@@ -643,8 +926,8 @@ HOME_N="$SANDBOX/home-n"
 mkdir -p "$HOME_N/.gentle-ai"
 : >"$HOME_N/.gentle-ai/state.json"
 : >"$SYNC_LOG"
-status_n=$(run08 "$HOME_N" "$NO_FNM_PATH_08")
-out_n=$(cat "$SANDBOX/out08")
+status_n=$(run09 "$HOME_N" "$NO_FNM_PATH_09")
+out_n=$(cat "$SANDBOX/out09")
 check "case e: returns success" "0" "$status_n"
 contains "case e: skip message mentions 07-node.sh" "07-node.sh" "$out_n"
 calls_n=$(wc -l <"$SYNC_LOG" | tr -d ' ')
@@ -655,37 +938,112 @@ HOME_O="$SANDBOX/home-o"
 mkdir -p "$HOME_O/.gentle-ai"
 : >"$HOME_O/.gentle-ai/state.json"
 : >"$SYNC_LOG"
-status_o=$(run08 "$HOME_O" "$FULL_PATH_08" 3)
-out_o=$(cat "$SANDBOX/out08")
+status_o=$(run09 "$HOME_O" "$FULL_PATH_09" 3)
+out_o=$(cat "$SANDBOX/out09")
 check "case f: still returns success" "0" "$status_o"
 contains "case f: prints a failure message" "gentle-ai sync failed" "$out_o"
 contains "case f: failure message names the rerun command" \
 	"fnm exec --using=default gentle-ai sync" "$out_o"
 
+# Case (g): pi is also runnable (via PATH or the agent bin path) -> after the
+# plain sync, 09 also runs `gentle-ai sync --agents pi`, same message style.
+mkdir -p "$SANDBOX/stub-09-with-pi"
+ln -s "$SANDBOX/stub-09/gentle-ai" "$SANDBOX/stub-09-with-pi/gentle-ai"
+ln -s "$SANDBOX/stub-09/opencode" "$SANDBOX/stub-09-with-pi/opencode"
+ln -s "$SANDBOX/stub-09/fnm" "$SANDBOX/stub-09-with-pi/fnm"
+ln -s "$SANDBOX/stub-09/timeout" "$SANDBOX/stub-09-with-pi/timeout"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$SANDBOX/stub-09-with-pi/pi"
+chmod +x "$SANDBOX/stub-09-with-pi/pi"
+WITH_PI_PATH_09="$SANDBOX/stub-09-with-pi:/usr/bin:/bin"
+
+HOME_P="$SANDBOX/home-p"
+mkdir -p "$HOME_P/.gentle-ai"
+: >"$HOME_P/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_p=$(run09 "$HOME_P" "$WITH_PI_PATH_09")
+out_p=$(cat "$SANDBOX/out09")
+check "case g1: returns success" "0" "$status_p"
+contains "case g1: reports the Pi sync succeeded" "gentle-ai Pi assets synced" "$out_p"
+pi_fnm_call=$(grep '^fnm exec --using=default gentle-ai sync --agents pi$' "$SYNC_LOG")
+check "case g1: fnm gets the exact Pi sync args" \
+	"fnm exec --using=default gentle-ai sync --agents pi" "$pi_fnm_call"
+base_sync_line=$(grep -n '^fnm exec --using=default gentle-ai sync$' "$SYNC_LOG" | head -n1 | cut -d: -f1)
+pi_sync_line=$(grep -n '^fnm exec --using=default gentle-ai sync --agents pi$' "$SYNC_LOG" | head -n1 | cut -d: -f1)
+if [ -n "$base_sync_line" ] && [ -n "$pi_sync_line" ] && [ "$base_sync_line" -lt "$pi_sync_line" ]; then
+	pi_order_ok=yes
+else
+	pi_order_ok=no
+fi
+check "case g1: the Pi sync runs after the plain sync" "yes" "$pi_order_ok"
+
+# Case (g2): pi is not on PATH but the agent bin launcher is executable.
+HOME_Q="$SANDBOX/home-q"
+mkdir -p "$HOME_Q/.gentle-ai" "$HOME_Q/.pi/agent/bin"
+: >"$HOME_Q/.gentle-ai/state.json"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_Q/.pi/agent/bin/pi"
+chmod +x "$HOME_Q/.pi/agent/bin/pi"
+: >"$SYNC_LOG"
+status_q=$(run09 "$HOME_Q" "$FULL_PATH_09")
+out_q=$(cat "$SANDBOX/out09")
+check "case g2: returns success" "0" "$status_q"
+contains "case g2: reports the Pi sync succeeded" "gentle-ai Pi assets synced" "$out_q"
+
+# Case (g3): pi is not runnable at all -> no Pi sync call is made.
+HOME_R="$SANDBOX/home-r"
+mkdir -p "$HOME_R/.gentle-ai"
+: >"$HOME_R/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_r=$(run09 "$HOME_R" "$FULL_PATH_09")
+out_r=$(cat "$SANDBOX/out09")
+check "case g3: returns success" "0" "$status_r"
+pi_calls_r=$(grep -c -- '--agents pi' "$SYNC_LOG")
+check "case g3: no Pi sync call is made" "0" "$pi_calls_r"
+
+# Case (g4): pi runnable but the Pi sync fails -> failure message names the
+# rerun command, status still 0.
+HOME_S="$SANDBOX/home-s"
+mkdir -p "$HOME_S/.gentle-ai"
+: >"$HOME_S/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_s=$(run09 "$HOME_S" "$WITH_PI_PATH_09" 3)
+out_s=$(cat "$SANDBOX/out09")
+check "case g4: still returns success" "0" "$status_s"
+contains "case g4: prints a Pi sync failure message" "gentle-ai Pi asset sync failed" "$out_s"
+contains "case g4: failure message names the rerun command" \
+	"fnm exec --using=default gentle-ai sync --agents pi" "$out_s"
+
 # ==============================================================================
-# Case (g) / ordering -- 04-brew-packages.sh must sort before 06-gentle-ai-
-# state.sh, 07-node.sh, 08-gentle-ai-sync.sh, 11-codegraph.sh,
-# 12-agent-integrations.sh and 14-claude-statusline.sh, all must be committed
-# executable, and the renamed scripts' old names must be gone.
+# Case (h) / ordering -- 04-brew-packages.sh must sort before 06-gentle-ai-
+# state.sh, 07-node.sh, 08-pi.sh, 09-gentle-ai-sync.sh, 10-moshi-remote.sh,
+# 11-codegraph.sh, 12-agent-integrations.sh and 14-claude-statusline.sh, the
+# renamed/new scripts must be committed executable, and every old name must be
+# gone.
 # ==============================================================================
 echo
 echo "restoration_scripts ordering"
 
-ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|11|12|14)-')
+ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|09|10|11|12|14)-')
 expected_order="04-brew-packages.sh
 06-gentle-ai-state.sh
 07-node.sh
-08-gentle-ai-sync.sh
+08-pi.sh
+09-gentle-ai-sync.sh
+10-moshi-remote.sh
 11-codegraph.sh
 12-agent-integrations.sh
 14-claude-statusline.sh"
-check "04 sorts before 06, 07, 08, 11, 12 and 14" "$expected_order" "$ordered"
+check "04 sorts before 06, 07, 08, 09, 10, 11, 12 and 14" "$expected_order" "$ordered"
 [ -x "$SCRIPT_04" ] && script_04_exec=yes || script_04_exec=no
 check "04-brew-packages.sh is executable" "yes" "$script_04_exec"
 [ -x "$SCRIPT_08" ] && script_08_exec=yes || script_08_exec=no
-check "08-gentle-ai-sync.sh is executable" "yes" "$script_08_exec"
+check "08-pi.sh is executable" "yes" "$script_08_exec"
+[ -x "$SCRIPT_09" ] && script_09_exec=yes || script_09_exec=no
+check "09-gentle-ai-sync.sh is executable" "yes" "$script_09_exec"
+[ -x "$DOTFILES_PATH/restoration_scripts/01-wslconfig.sh" ] && script_01_exec=yes || script_01_exec=no
+check "01-wslconfig.sh is executable" "yes" "$script_01_exec"
 
-for _old_name in 06-claude-statusline.sh 07-gentle-ai-state.sh 08-node.sh; do
+for _old_name in 06-claude-statusline.sh 07-gentle-ai-state.sh 08-node.sh \
+	01-sample_script.sh 09-wslconfig.sh 08-gentle-ai-sync.sh; do
 	[ -e "$DOTFILES_PATH/restoration_scripts/$_old_name" ] && old_present=yes || old_present=no
 	check "$_old_name no longer exists" "no" "$old_present"
 done

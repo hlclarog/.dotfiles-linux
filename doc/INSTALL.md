@@ -101,14 +101,15 @@ regardless of the real result; script 04's output in `~/dotly.log` is the
 place to check whether the Brewfile installed. Re-running `dot self install`
 afterward is not needed just for ordering.
 
-`self install` creates the 14 symlinks and runs the restoration scripts: brew
-packages (script 04), the Windows drive link, `/etc/wsl.conf`, the projects
-skeleton, the gentle-ai selections (script 06), the Node pin (script 07), the
-Windows-side `.wslconfig` (script 09) and Moshi remote access (script 10).
-Script 08 then runs `gentle-ai sync` from the state script 06 restored -- see
-step 8. Script 11 also installs CodeGraph itself, running `npm i -g
+`self install` creates the 14 symlinks and runs the restoration scripts: the
+Windows-side `.wslconfig` (script 01), brew packages (script 04), the Windows
+drive link, `/etc/wsl.conf`, the projects skeleton, the gentle-ai selections
+(script 06), the Node pin (script 07), Pi itself (script 08) and Moshi remote
+access (script 10). Script 09 then runs `gentle-ai sync` from the state script
+06 restored, and also syncs Pi's own agent assets once script 08 installed it
+-- see step 8. Script 11 also installs CodeGraph itself, running `npm i -g
 @colbymchenry/codegraph` through fnm's default Node the first time it finds the
-wrapper symlinked but no shim installed yet. Script 14, sorting after 08, sets
+wrapper symlinked but no shim installed yet. Script 14, sorting after 09, sets
 the Claude Code statusline. Restoration scripts must be committed executable
 (`100755`): `dot self install` silently skips any script that is not.
 
@@ -127,7 +128,29 @@ executable.
 
 ## 8. Agent assets (already synced by the restore)
 
-Script 08 already did this during step 6, once `gentle-ai`, `opencode` and
+Script 08 installs Pi itself first: it downloads the official installer from
+`https://pi.dev/install.sh` and runs it through `fnm exec --using=default`,
+detached from the terminal (`setsid -w`, or a `python3` fallback where
+`setsid` is missing, such as macOS) with stdin redirected from `/dev/null`.
+Detaching matters: with a real `/dev/tty` reachable the installer shows an
+interactive menu and offers to append a PATH line to `~/.zshrc`, which here is
+a symlink into this repository. `$HOME/bin` is put first on PATH for the run,
+matching `shell/exports.sh`, so the installer's PATH probe picks the same
+launcher location already used on the reference machine. Once Pi is on PATH,
+script 08 seeds `~/.pi/agent/{settings,subagents,claude-bridge,mcp}.json` from
+`config/pi/agent/` (never overwriting an existing file), builds
+`~/.pi/gentle-ai/profiles.json` with all four saved profiles (`current`,
+`claude-full`, `claude-full.autogen`, `open-ai-full.autogen`) with
+`claude-full.autogen` active, installs every package pinned in the seeded
+`settings.json` with `pi install <source>` -- `pi update --extensions`
+silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
+is installed explicitly instead -- and finally runs `pi -p
+"/gentle:install-sdd"` to install the SDD agents, chains and support files.
+The **only** manual step left afterward is logging into Pi;
+`~/.pi/agent/auth.json` is never restored. Switch the active profile from
+inside Pi with `/gentle:profiles`.
+
+Script 09 already did this during step 6, once `gentle-ai`, `opencode` and
 `fnm` were on PATH (script 04) and `~/.gentle-ai/state.json` -- the preset, the
 SDD mode, strict TDD and every per-phase model and effort assignment -- was
 restored (script 06). It warms up opencode's first start (its own
@@ -135,9 +158,11 @@ restored (script 06). It warms up opencode's first start (its own
 config`, then runs `fnm exec --using=default gentle-ai sync`, which regenerates
 what that state produces: `~/.claude`, `~/.config/opencode` and `~/.codex`.
 Those directories are deliberately absent from the repository — they are
-generated output, not configuration.
+generated output, not configuration. If script 08 installed Pi, it also runs
+`gentle-ai sync --agents pi`, which writes the context7 MCP entry and
+`~/.pi/gentle-ai/persona.json` while preserving any existing engram entry.
 
-`dot self install` is safe to rerun on an already set-up machine: script 08
+`dot self install` is safe to rerun on an already set-up machine: script 09
 re-syncs the agent assets from the current state file every time. To resync by
 hand:
 
@@ -145,20 +170,27 @@ hand:
 fnm exec --using=default gentle-ai sync
 ```
 
-### Restore the Pi OpenAI model profile (optional, manual)
+### Restore the Pi OpenAI model profile (manual recovery for an existing registry)
 
-From the dotfiles checkout, run this **only if you want** the saved 26-role
-`open-ai-full.autogen` mapping in Pi:
+A fresh machine already has this: script 08 builds
+`~/.pi/gentle-ai/profiles.json` with all four saved profiles (`current`,
+`claude-full`, `claude-full.autogen`, `open-ai-full.autogen`) and activates
+`claude-full.autogen` the first time it installs Pi, so nothing else needs to
+run for a new machine.
+
+This script instead exists for an **existing** registry that predates that
+restore, or one where `open-ai-full.autogen` is missing or was overwritten
+with Claude mappings. Run it from the dotfiles checkout:
 
 ```bash
 cd "$HOME/.dotfiles"
 ./scripts/restore-pi-openai-profile
 ```
 
-This command is not part of `dot self install` or `gentle-ai`. On a new Pi
-registry it creates the profile and makes it active; on an existing registry it
-adds only the missing profile, **never changes the active selection**, and
-returns without writing when the profile already matches. By default, it
+This command is not part of `dot self install` or `gentle-ai`. On an existing
+registry it adds only the missing profile, **never changes the active
+selection**, and returns without writing when the profile already matches. By
+default, it
 refuses to overwrite a different same-name profile; malformed or symlinked
 registries are always refused. If the 26 OpenAI roles were overwritten with
 Claude mappings, **close Pi first** and review the existing
@@ -211,7 +243,7 @@ Revoking SSH keys does **not** release the first layer's claim.
 ### 9.1 Networking: mirrored, not NAT
 
 Nothing works without this. Under NAT `eth0` sits on a private `172.x` address
-that no other device on the LAN can reach. Script 09 installs `.wslconfig`; then,
+that no other device on the LAN can reach. Script 01 installs `.wslconfig`; then,
 from **Windows PowerShell**:
 
 ```powershell

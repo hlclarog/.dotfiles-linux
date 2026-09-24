@@ -1,0 +1,96 @@
+{
+  "model_profiles": {
+    "sdd-init": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "effort": "medium"
+    },
+    "sdd-onboard": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "effort": "medium"
+    },
+    "sdd-explore": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "sdd-research": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "sdd-proposal": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "sdd-spec": {
+      "model": "claude-bridge/claude-fable-5-1",
+      "effort": "max"
+    },
+    "sdd-design": {
+      "model": "claude-bridge/claude-fable-5-1",
+      "effort": "max"
+    },
+    "sdd-tasks": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "sdd-status": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "effort": "medium"
+    },
+    "sdd-apply": {
+      "model": "claude-bridge/claude-fable-5-1",
+      "effort": "max"
+    },
+    "sdd-verify": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "effort": "max"
+    },
+    "sdd-archive": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "effort": "medium"
+    },
+    "jd-judge-a": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "effort": "max"
+    },
+    "jd-judge-b": {
+      "model": "claude-bridge/claude-fable-5-1",
+      "effort": "max"
+    },
+    "jd-fix-agent": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "gentle-ai-explore": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "gentle-ai-verify": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "effort": "max"
+    },
+    "gentle-ai-worker": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "review-readability": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "review-reliability": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "review-resilience": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "review-risk": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "effort": "high"
+    },
+    "sdd-sync": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "effort": "medium"
+    }
+  }
+}
