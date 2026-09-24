@@ -138,14 +138,25 @@ a symlink into this repository. `$HOME/bin` is put first on PATH for the run,
 matching `shell/exports.sh`, so the installer's PATH probe picks the same
 launcher location already used on the reference machine. Once Pi is on PATH,
 script 08 seeds `~/.pi/agent/{settings,subagents,claude-bridge,mcp}.json` from
-`config/pi/agent/` (never overwriting an existing file), builds
-`~/.pi/gentle-ai/profiles.json` with all four saved profiles (`current`,
-`claude-full`, `claude-full.autogen`, `open-ai-full.autogen`) with
+`config/pi/agent/` (never overwriting an existing file), then repairs
+`claude-bridge.json`'s `pathToClaudeCodeExecutable`: the seed assumes Claude's
+native installer (`~/.local/bin/claude`), matching the reference machine, but
+when that path is not an executable file -- for example when Claude comes
+from Homebrew instead -- it is rewritten to whatever `claude` resolves to on
+PATH, or dropped entirely (falling back to the SDK's own lookup) when no
+`claude` is found. This repair also runs against a `claude-bridge.json` left
+over from an earlier restore, not just a freshly seeded one. Script 08 then
+builds `~/.pi/gentle-ai/profiles.json` with all four saved profiles
+(`current`, `claude-full`, `claude-full.autogen`, `open-ai-full.autogen`) with
 `claude-full.autogen` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
 is installed explicitly instead -- and finally runs `pi -p
-"/gentle:install-sdd"` to install the SDD agents, chains and support files.
+"/gentle:install-sdd"` **twice** to install the SDD agents, chains and support
+files: gentle-pi only applies the saved models to installed agents at
+session_start, and the first run's install-sdd creates those agents after
+that point in the same session, so they lack model/thinking frontmatter until
+a second session's session_start reapplies the saved models to them.
 The **only** manual step left afterward is logging into Pi;
 `~/.pi/agent/auth.json` is never restored. Switch the active profile from
 inside Pi with `/gentle:profiles`.

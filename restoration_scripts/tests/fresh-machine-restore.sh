@@ -550,6 +550,9 @@ if [ "$1" = "install" ]; then
 	esac
 	mkdir -p "$HOME/.pi/agent/npm/node_modules/$pkg"
 fi
+if [ "$1" = "-p" ]; then
+	exit "${PI_SDD_EXIT:-${PI_EXIT:-0}}"
+fi
 exit "${PI_EXIT:-0}"
 PISTUB
 chmod +x "$HOME/.pi/agent/bin/pi"
@@ -605,6 +608,15 @@ unset _bin
 BASE_PI_PATH="$SANDBOX/stub-08pi:/usr/bin:/bin"
 NO_SETSID_PI_PATH="$SANDBOX/stub-08pi-nosetsid:/usr/bin:/bin"
 
+mkdir -p "$SANDBOX/stub-08pi-with-claude"
+for _bin in curl fnm setsid timeout brew jq; do
+	ln -s "$SANDBOX/stub-08pi/$_bin" "$SANDBOX/stub-08pi-with-claude/$_bin"
+done
+unset _bin
+printf '#!/usr/bin/env bash\nexit 0\n' >"$SANDBOX/stub-08pi-with-claude/claude"
+chmod +x "$SANDBOX/stub-08pi-with-claude/claude"
+WITH_CLAUDE_PI_PATH="$SANDBOX/stub-08pi-with-claude:/usr/bin:/bin"
+
 run08pi() {
 	(
 		HOME="$1"
@@ -613,7 +625,8 @@ run08pi() {
 		BREW_PREFIX_CANDIDATES="${4:-/no/such/brew-a /no/such/brew-b}"
 		CURL_FAIL="${5:-0}"
 		PI_EXIT="${6:-0}"
-		export HOME PATH PI_INSTALL_URL BREW_PREFIX_CANDIDATES CURL_FAIL PI_EXIT PI_LOG DOTFILES_PATH
+		PI_SDD_EXIT="${7:-}"
+		export HOME PATH PI_INSTALL_URL BREW_PREFIX_CANDIDATES CURL_FAIL PI_EXIT PI_SDD_EXIT PI_LOG DOTFILES_PATH
 		. "$SCRIPT_08"
 	) >"$SANDBOX/out08pi" 2>&1
 	echo $?
@@ -621,7 +634,9 @@ run08pi() {
 
 # Case (a): fresh machine.
 HOME_PI_A="$SANDBOX/home-pi-a"
-mkdir -p "$HOME_PI_A"
+mkdir -p "$HOME_PI_A/.local/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_PI_A/.local/bin/claude"
+chmod +x "$HOME_PI_A/.local/bin/claude"
 printf 'sentinel-zshrc-content\n' >"$HOME_PI_A/.zshrc"
 zshrc_before=$(sha256sum "$HOME_PI_A/.zshrc" | awk '{print $1}')
 : >"$PI_LOG"
@@ -680,14 +695,18 @@ install_calls=$(grep '^pi install ' "$PI_LOG")
 expected_installs=$(jq -r '.packages[] | "pi install " + .' "$DOTFILES_PATH/config/pi/agent/settings.json")
 check "case a: pi install runs once per package with the exact sources" "$expected_installs" "$install_calls"
 
-sdd_line=$(grep -n 'pi -p /gentle:install-sdd' "$PI_LOG" | tail -n1 | cut -d: -f1)
+sdd_first_line=$(grep -n '^pi -p /gentle:install-sdd$' "$PI_LOG" | head -n1 | cut -d: -f1)
 last_install_line=$(grep -n '^pi install ' "$PI_LOG" | tail -n1 | cut -d: -f1)
-if [ -n "$sdd_line" ] && [ -n "$last_install_line" ] && [ "$sdd_line" -gt "$last_install_line" ]; then
+if [ -n "$sdd_first_line" ] && [ -n "$last_install_line" ] && [ "$sdd_first_line" -gt "$last_install_line" ]; then
 	sdd_order_ok=yes
 else
 	sdd_order_ok=no
 fi
-check "case a: the SDD install runs after every package install" "yes" "$sdd_order_ok"
+check "case a: both SDD install runs happen after every package install" "yes" "$sdd_order_ok"
+sdd_calls_a=$(grep -c '^pi -p /gentle:install-sdd$' "$PI_LOG")
+check "case a: install-sdd runs exactly twice" "2" "$sdd_calls_a"
+success_msg_count_a=$(printf '%s\n' "$out_pi_a" | grep -c 'Pi agent assets installed')
+check "case a: success message is reported once" "1" "$success_msg_count_a"
 contains "case a: reports the SDD assets installed" "Pi agent assets installed" "$out_pi_a"
 
 # Case (b): rerun -- Pi and the seed files already exist.
@@ -767,6 +786,104 @@ check "case f: returns success" "0" "$status_pi_f"
 profiles_after_f=$(cat "$HOME_PI_F/.pi/gentle-ai/profiles.json")
 check "case f: the existing profiles.json is left untouched" "$profiles_before_f" "$profiles_after_f"
 contains "case f: hint mentions scripts/restore-pi-openai-profile" "scripts/restore-pi-openai-profile" "$out_pi_f"
+
+# Case (g): the first install-sdd attempt fails -> no second attempt is made,
+# the existing failure message style is kept, status is still 0.
+HOME_PI_G="$SANDBOX/home-pi-g"
+mkdir -p "$HOME_PI_G"
+: >"$PI_LOG"
+status_pi_g=$(run08pi "$HOME_PI_G" "$BASE_PI_PATH" "" "" 0 0 7)
+out_pi_g=$(cat "$SANDBOX/out08pi")
+check "case g: returns success" "0" "$status_pi_g"
+sdd_calls_g=$(grep -c '^pi -p /gentle:install-sdd$' "$PI_LOG")
+check "case g: install-sdd is attempted only once" "1" "$sdd_calls_g"
+contains "case g: reports the install-sdd failure" "Pi agent asset install failed (exit 7)" "$out_pi_g"
+
+# ==============================================================================
+# claude-bridge.json path repair -- pathToClaudeCodeExecutable must point at
+# an executable Claude binary, both for a freshly seeded file and for an
+# existing one from an earlier restore.
+# ==============================================================================
+echo
+echo "claude-bridge.json path repair"
+
+# Case bridge-i: freshly seeded path is missing, claude is on PATH -> the
+# value is rewritten to the resolved claude path; every other key is intact.
+HOME_BRIDGE_I="$SANDBOX/home-bridge-i"
+mkdir -p "$HOME_BRIDGE_I"
+: >"$PI_LOG"
+status_bridge_i=$(run08pi "$HOME_BRIDGE_I" "$WITH_CLAUDE_PI_PATH")
+check "case bridge-i: returns success" "0" "$status_bridge_i"
+bridge_i_file="$HOME_BRIDGE_I/.pi/agent/claude-bridge.json"
+bridge_i_path=$(jq -r '.provider.pathToClaudeCodeExecutable' "$bridge_i_file")
+check "case bridge-i: path is rewritten to the resolved claude binary" \
+	"$SANDBOX/stub-08pi-with-claude/claude" "$bridge_i_path"
+bridge_i_perm=$(stat -c '%a' "$bridge_i_file")
+check "case bridge-i: mode stays 600" "600" "$bridge_i_perm"
+bridge_i_seed=$(sed -e "s|@HOME@|$HOME_BRIDGE_I|g" -e "s|@BREW_PREFIX@|/sandbox/brew|g" \
+	"$DOTFILES_PATH/config/pi/agent/claude-bridge.json" | jq -S 'del(.provider.pathToClaudeCodeExecutable)')
+bridge_i_actual=$(jq -S 'del(.provider.pathToClaudeCodeExecutable)' "$bridge_i_file")
+check "case bridge-i: every other key is unchanged" "$bridge_i_seed" "$bridge_i_actual"
+
+# Case bridge-ii: no claude anywhere on PATH -> the key is removed, falling
+# back to the SDK's default Claude lookup.
+HOME_BRIDGE_II="$SANDBOX/home-bridge-ii"
+mkdir -p "$HOME_BRIDGE_II"
+: >"$PI_LOG"
+status_bridge_ii=$(run08pi "$HOME_BRIDGE_II" "$BASE_PI_PATH")
+out_bridge_ii=$(cat "$SANDBOX/out08pi")
+check "case bridge-ii: returns success" "0" "$status_bridge_ii"
+bridge_ii_file="$HOME_BRIDGE_II/.pi/agent/claude-bridge.json"
+bridge_ii_has_key=$(jq -r '.provider | has("pathToClaudeCodeExecutable")' "$bridge_ii_file")
+check "case bridge-ii: pathToClaudeCodeExecutable is removed" "false" "$bridge_ii_has_key"
+bridge_ii_seed_provider=$(sed -e "s|@HOME@|$HOME_BRIDGE_II|g" -e "s|@BREW_PREFIX@|/sandbox/brew|g" \
+	"$DOTFILES_PATH/config/pi/agent/claude-bridge.json" | jq -S '.provider | del(.pathToClaudeCodeExecutable)')
+bridge_ii_actual_provider=$(jq -S '.provider' "$bridge_ii_file")
+check "case bridge-ii: every other provider key is unchanged" "$bridge_ii_seed_provider" "$bridge_ii_actual_provider"
+contains "case bridge-ii: reports the default Claude lookup" "default Claude lookup" "$out_bridge_ii"
+
+# Case bridge-iii: an existing file already points at an executable Claude
+# binary -> left byte-identical.
+HOME_BRIDGE_III="$SANDBOX/home-bridge-iii"
+mkdir -p "$HOME_BRIDGE_III/.pi/agent/bin" "$HOME_BRIDGE_III/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_BRIDGE_III/.pi/agent/bin/pi"
+chmod +x "$HOME_BRIDGE_III/.pi/agent/bin/pi"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_BRIDGE_III/bin/claude"
+chmod +x "$HOME_BRIDGE_III/bin/claude"
+jq --arg p "$HOME_BRIDGE_III/bin/claude" \
+	'.provider.pathToClaudeCodeExecutable = $p' "$DOTFILES_PATH/config/pi/agent/claude-bridge.json" \
+	>"$HOME_BRIDGE_III/.pi/agent/claude-bridge.json"
+chmod 600 "$HOME_BRIDGE_III/.pi/agent/claude-bridge.json"
+bridge_iii_before=$(sha256sum "$HOME_BRIDGE_III/.pi/agent/claude-bridge.json" | awk '{print $1}')
+: >"$PI_LOG"
+status_bridge_iii=$(run08pi "$HOME_BRIDGE_III" "$BASE_PI_PATH")
+check "case bridge-iii: returns success" "0" "$status_bridge_iii"
+bridge_iii_after=$(sha256sum "$HOME_BRIDGE_III/.pi/agent/claude-bridge.json" | awk '{print $1}')
+check "case bridge-iii: an already-executable path is left byte-identical" \
+	"$bridge_iii_before" "$bridge_iii_after"
+
+# Case bridge-iv: an existing file has a stale path (rerun on a machine whose
+# Claude moved) and claude is now on PATH -> the path is repaired in place.
+HOME_BRIDGE_IV="$SANDBOX/home-bridge-iv"
+mkdir -p "$HOME_BRIDGE_IV/.pi/agent/bin"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_BRIDGE_IV/.pi/agent/bin/pi"
+chmod +x "$HOME_BRIDGE_IV/.pi/agent/bin/pi"
+jq --arg p "$HOME_BRIDGE_IV/.local/bin/claude" \
+	'.provider.pathToClaudeCodeExecutable = $p | .customTopLevelField = true' \
+	"$DOTFILES_PATH/config/pi/agent/claude-bridge.json" \
+	>"$HOME_BRIDGE_IV/.pi/agent/claude-bridge.json"
+chmod 600 "$HOME_BRIDGE_IV/.pi/agent/claude-bridge.json"
+: >"$PI_LOG"
+status_bridge_iv=$(run08pi "$HOME_BRIDGE_IV" "$WITH_CLAUDE_PI_PATH")
+check "case bridge-iv: returns success" "0" "$status_bridge_iv"
+bridge_iv_file="$HOME_BRIDGE_IV/.pi/agent/claude-bridge.json"
+bridge_iv_path=$(jq -r '.provider.pathToClaudeCodeExecutable' "$bridge_iv_file")
+check "case bridge-iv: the stale path is repaired" \
+	"$SANDBOX/stub-08pi-with-claude/claude" "$bridge_iv_path"
+bridge_iv_custom=$(jq -r '.customTopLevelField' "$bridge_iv_file")
+check "case bridge-iv: unrelated top-level keys are preserved" "true" "$bridge_iv_custom"
+bridge_iv_perm=$(stat -c '%a' "$bridge_iv_file")
+check "case bridge-iv: mode stays 600" "600" "$bridge_iv_perm"
 
 # ==============================================================================
 # config/pi/agent seed files -- no leftover /home/ literal, valid JSON, and

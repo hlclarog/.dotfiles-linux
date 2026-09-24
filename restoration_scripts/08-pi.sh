@@ -30,6 +30,23 @@
 # installs herdr's pi integration only when ~/.pi/agent already exists, which
 # this script is what creates on a fresh machine).
 #
+# WHY INSTALL-SDD RUNS TWICE: gentle-pi applies the saved models
+# (~/.pi/gentle-ai/models.json) to installed agents only at session_start.
+# The first `pi -p "/gentle:install-sdd"` run creates the 12 sdd-*.md agents
+# AFTER that point in the same session, so they end up without model/thinking
+# frontmatter. Measured on a fresh Ubuntu VM: a second run's session_start
+# reapplies the saved models to the agents the first run just created, fixing
+# every one of them.
+#
+# WHY THE CLAUDE-BRIDGE PATH IS REPAIRED: the seed's pathToClaudeCodeExecutable
+# assumes Claude's native installer (~/.local/bin/claude), matching the
+# reference machine. On the VM Claude comes from Homebrew instead, so that
+# path does not exist and pi-claude-bridge would try to spawn a missing
+# binary. After seeding, this script rewrites the path to whatever `claude`
+# resolves to on PATH, or drops the key (falling back to the SDK's own lookup)
+# when no `claude` is found -- repairing a freshly seeded file and an
+# existing one from an earlier restore alike.
+#
 # Sourced by `dot self install`, so it uses return rather than exit.
 
 if ! command -v fnm >/dev/null 2>&1; then
@@ -113,6 +130,32 @@ for pi_seed in settings subagents claude-bridge mcp; do
 done
 unset pi_seed pi_seed_dst pi_brew_prefix
 
+# The seed's pathToClaudeCodeExecutable assumes Claude's native installer
+# (~/.local/bin/claude), matching the reference machine. Repair it here --
+# both for the file just seeded above and for one left over from an earlier
+# restore -- when it points at a binary that turns out not to exist, such as
+# when Claude is installed through Homebrew instead.
+pi_bridge_file="$HOME/.pi/agent/claude-bridge.json"
+if [ -f "$pi_bridge_file" ]; then
+	pi_bridge_claude=$(jq -r '.provider.pathToClaudeCodeExecutable // empty' "$pi_bridge_file" 2>/dev/null)
+	if [ -n "$pi_bridge_claude" ] && [ ! -x "$pi_bridge_claude" ]; then
+		pi_bridge_tmp=$(mktemp "$HOME/.pi/agent/claude-bridge.json.XXXXXX")
+		if pi_bridge_new_claude=$(command -v claude 2>/dev/null); then
+			jq --arg p "$pi_bridge_new_claude" '.provider.pathToClaudeCodeExecutable = $p' \
+				"$pi_bridge_file" >"$pi_bridge_tmp"
+			echo " > Pi claude-bridge now uses $pi_bridge_new_claude"
+		else
+			jq 'del(.provider.pathToClaudeCodeExecutable)' "$pi_bridge_file" >"$pi_bridge_tmp"
+			echo " > Pi claude-bridge found no claude on PATH; it will use the default Claude lookup"
+		fi
+		chmod 600 "$pi_bridge_tmp"
+		mv "$pi_bridge_tmp" "$pi_bridge_file"
+		unset pi_bridge_new_claude pi_bridge_tmp
+	fi
+	unset pi_bridge_claude
+fi
+unset pi_bridge_file
+
 if [ ! -d "$HOME/.pi/gentle-ai" ]; then
 	mkdir -p "$HOME/.pi/gentle-ai"
 	chmod 700 "$HOME/.pi/gentle-ai"
@@ -186,19 +229,33 @@ unset -f pi_pkg_name
 unset pi_settings pi_pkg_src
 
 # --- 7. assets -----------------------------------------------------------------
-if [ -d "$HOME/.pi/agent/npm/node_modules/gentle-pi" ]; then
+pi_install_sdd_once() {
 	if command -v timeout >/dev/null 2>&1; then
-		pi_sdd_status=0
-		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" timeout 180 pi -p "/gentle:install-sdd" </dev/null >/dev/null 2>&1) || pi_sdd_status=$?
+		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" timeout 180 pi -p "/gentle:install-sdd" </dev/null >/dev/null 2>&1)
 	else
-		pi_sdd_status=0
-		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" pi -p "/gentle:install-sdd" </dev/null >/dev/null 2>&1) || pi_sdd_status=$?
+		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" pi -p "/gentle:install-sdd" </dev/null >/dev/null 2>&1)
+	fi
+}
+
+if [ -d "$HOME/.pi/agent/npm/node_modules/gentle-pi" ]; then
+	pi_sdd_status=0
+	pi_install_sdd_once || pi_sdd_status=$?
+	if [ "$pi_sdd_status" -eq 0 ]; then
+		# Run install-sdd a second time: gentle-pi applies the saved models
+		# (~/.pi/gentle-ai/models.json) to installed agents only at
+		# session_start, and the first run's install-sdd creates the 12
+		# sdd-*.md agents AFTER that point in the same session, leaving them
+		# without model/thinking frontmatter. The second session's
+		# session_start reapplies the saved models to the agents the first
+		# run just created.
+		pi_install_sdd_once || pi_sdd_status=$?
 	fi
 	if [ "$pi_sdd_status" -eq 0 ]; then
 		echo " > Pi agent assets installed"
 	else
 		echo " > Pi agent asset install failed (exit $pi_sdd_status); rerun: fnm exec --using=default pi -p \"/gentle:install-sdd\""
 	fi
+	unset -f pi_install_sdd_once
 	unset pi_sdd_status
 fi
 
