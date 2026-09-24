@@ -54,7 +54,7 @@ brew "gentleman-programming/tap/gentleman-dots", trusted: true
 # Ultra-fast parser for declarative command-line options, required by dotly
 brew "denisidoro/tools/docpars", trusted: true
 # Lightweight and flexible command-line JSON processor
-# Required by the Claude Code statusline and restoration script 06.
+# Required by the Claude Code statusline and restoration script 14.
 brew "jq"
 # Persistent memory for AI coding agents
 brew "gentleman-programming/tap/engram", trusted: true

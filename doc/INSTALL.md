@@ -103,13 +103,14 @@ afterward is not needed just for ordering.
 
 `self install` creates the 14 symlinks and runs the restoration scripts: brew
 packages (script 04), the Windows drive link, `/etc/wsl.conf`, the projects
-skeleton, the Claude Code statusline, the gentle-ai selections, the Node pin,
-the Windows-side `.wslconfig` (script 09) and Moshi remote access (script 10).
-Script 11 also installs CodeGraph itself, running `npm i -g
+skeleton, the gentle-ai selections (script 06), the Node pin (script 07), the
+Windows-side `.wslconfig` (script 09) and Moshi remote access (script 10).
+Script 08 then runs `gentle-ai sync` from the state script 06 restored -- see
+step 8. Script 11 also installs CodeGraph itself, running `npm i -g
 @colbymchenry/codegraph` through fnm's default Node the first time it finds the
-wrapper symlinked but no shim installed yet. Restoration scripts must be
-committed executable (`100755`): `dot self install` silently skips any script
-that is not.
+wrapper symlinked but no shim installed yet. Script 14, sorting after 08, sets
+the Claude Code statusline. Restoration scripts must be committed executable
+(`100755`): `dot self install` silently skips any script that is not.
 
 ## 7. Apply `/etc/wsl.conf`
 
@@ -124,17 +125,25 @@ Reopen the terminal. This is what activates systemd, the default user, and the
 `metadata,umask=22,fmask=11` mount options that keep files on the Windows drives
 executable.
 
-## 8. Reinstall the agent assets
+## 8. Agent assets (already synced by the restore)
+
+Script 08 already did this during step 6, once `gentle-ai`, `opencode` and
+`fnm` were on PATH (script 04) and `~/.gentle-ai/state.json` -- the preset, the
+SDD mode, strict TDD and every per-phase model and effort assignment -- was
+restored (script 06). It warms up opencode's first start (its own
+`node_modules` bootstrap can take a couple of minutes) with `opencode debug
+config`, then runs `fnm exec --using=default gentle-ai sync`, which regenerates
+what that state produces: `~/.claude`, `~/.config/opencode` and `~/.codex`.
+Those directories are deliberately absent from the repository — they are
+generated output, not configuration.
+
+`dot self install` is safe to rerun on an already set-up machine: script 08
+re-syncs the agent assets from the current state file every time. To resync by
+hand:
 
 ```bash
-gentle-ai
+fnm exec --using=default gentle-ai sync
 ```
-
-`~/.gentle-ai/state.json` was restored in step 6, so the preset, the SDD mode,
-strict TDD and every per-phase model and effort assignment are already chosen.
-This regenerates what they produce: `~/.claude`, `~/.config/opencode` and
-`~/.codex`. Those directories are deliberately absent from the repository — they
-are generated output, not configuration.
 
 ### Restore the Pi OpenAI model profile (optional, manual)
 

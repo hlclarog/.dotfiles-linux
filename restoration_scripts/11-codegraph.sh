@@ -37,7 +37,7 @@ codegraph_matcher="startup|resume|clear"
 # depends on PATH state the install does not guarantee: ~/.local/bin (where
 # the wrapper is symlinked) is not necessarily on PATH yet, and each
 # restoration script runs in its own subshell (`. "$script" | log::file ...`),
-# so 08-node.sh's `eval "$(fnm env)"` never carries into this one either. The
+# so 07-node.sh's `eval "$(fnm env)"` never carries into this one either. The
 # net effect was that codegraph was never actually installed by the restore.
 # The wrapper and the npm shim it needs (see the gotcha in doc/INSTALL.md: the
 # shim lives under the fnm-scoped global prefix) are checked by exact path

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Install this machine's Brewfile before scripts 06/08/11/13 need jq/fnm.
+# Install this machine's Brewfile before scripts 07/11/13/14 need jq/fnm.
 #
 # `dot self install` sources restoration_scripts/*.sh in `sort` order, each
 # in its own subshell (`. "$script" | log::file ...`), BEFORE the restorer's
 # own `dot package import` (see modules/dotly/restorer). That import also
 # throws away all its output and always reports success regardless of the
 # real exit status (`dot package import >/dev/null 2>&1 | _log ...`). So
-# scripts 06 (jq), 08 (fnm), 11 (codegraph, via fnm) and 13 (engram) used to
+# scripts 14 (jq), 07 (fnm), 11 (codegraph, via fnm) and 13 (engram) used to
 # run before their packages existed, and a failed import looked identical to
 # a working one. This script (04, sorting before all of them) installs the
 # Brewfile itself instead of waiting for that later, silent import.

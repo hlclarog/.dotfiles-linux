@@ -12,7 +12,7 @@
 #      (tap/name), so a bare `cask "openai"` stays refused even with the tap
 #      declared. `brew bundle install` then aborts on the first refused cask.
 #
-#   2. restoration_scripts/06-claude-statusline.sh (and, for the same reason,
+#   2. restoration_scripts/14-claude-statusline.sh (and, for the same reason,
 #      11-codegraph.sh's Claude hook) does `[ -f "$claude_settings" ] ||
 #      return 0`. On a fresh machine ~/.claude/settings.json does not exist
 #      yet -- Claude Code only writes it on first launch, and script 12
@@ -22,7 +22,7 @@
 #   3. restoration_scripts/11-codegraph.sh gates itself on `command -v
 #      codegraph`, but nothing in the restore ever installs the npm shim the
 #      wrapper needs, and `dot self install` runs every script in its own
-#      subshell (`. "$script" | log::file ...`), so 08-node.sh's
+#      subshell (`. "$script" | log::file ...`), so 07-node.sh's
 #      `eval "$(fnm env)"` never carries to this script either. The result is
 #      an install that always prints "run npm i -g @colbymchenry/codegraph"
 #      and never runs it.
@@ -31,14 +31,14 @@
 #      restorer's own `dot package import` (modules/dotly/restorer), and that
 #      import throws away all output and always reports success regardless of
 #      the real exit status (`dot package import >/dev/null 2>&1 | _log
-#      ...`). So scripts 06 (jq), 08 (fnm), 11 (codegraph, via fnm) and 13
+#      ...`). So scripts 14 (jq), 07 (fnm), 11 (codegraph, via fnm) and 13
 #      (engram) used to run before their packages existed, and a failed
 #      import looked identical to a working one. Homebrew 7.0.6 also aborts
 #      `brew bundle install` entirely on the first untrusted cask even when
 #      the Brewfile already marks it `trusted: true` --
 #      Cask::CaskLoader.load raises before installer.rb ever applies the
 #      Brewfile's trust options. restoration_scripts/04-brew-packages.sh
-#      (sorting before 06/08/11/13) installs the Brewfile itself, pre-trusting
+#      (sorting before 07/11/13/14) installs the Brewfile itself, pre-trusting
 #      every entry first.
 #
 # Nothing here touches the real machine. Bug 1 is checked by parsing the
@@ -63,8 +63,9 @@ export DOTFILES_PATH
 BREWFILE="$DOTFILES_PATH/os/linux/brew/Brewfile"
 SCRIPT_00="$DOTFILES_PATH/restoration_scripts/00-default-shell.sh"
 SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
-SCRIPT_06="$DOTFILES_PATH/restoration_scripts/06-claude-statusline.sh"
+SCRIPT_08="$DOTFILES_PATH/restoration_scripts/08-gentle-ai-sync.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
+SCRIPT_14="$DOTFILES_PATH/restoration_scripts/14-claude-statusline.sh"
 
 tests_run=0 tests_failed=0
 pass() { tests_run=$((tests_run + 1)); printf '  ok   %s\n' "$1"; }
@@ -108,17 +109,17 @@ SANDBOX=$(mktemp -d) || exit 1
 trap 'rm -rf "$SANDBOX"' EXIT
 
 # ==============================================================================
-# Bug 2 -- 06-claude-statusline.sh must not skip when settings.json is missing.
+# Bug 2 -- 14-claude-statusline.sh must not skip when settings.json is missing.
 # ==============================================================================
 echo
-echo "06-claude-statusline.sh"
+echo "14-claude-statusline.sh"
 
-run06() { ( HOME="$1"; export HOME; . "$SCRIPT_06" ) 2>&1; }
+run14() { ( HOME="$1"; export HOME; . "$SCRIPT_14" ) 2>&1; }
 
 # Case: missing settings.json -> created with the statusLine key.
 HOME_A="$SANDBOX/home-a"
 mkdir -p "$HOME_A"
-run06 "$HOME_A" >/dev/null
+run14 "$HOME_A" >/dev/null
 expected_cmd="bash $HOME_A/.claude/statusline-command.sh"
 actual_cmd=$(jq -r '.statusLine.command // ""' "$HOME_A/.claude/settings.json" 2>/dev/null)
 actual_interval=$(jq -r '.statusLine.refreshInterval // 0' "$HOME_A/.claude/settings.json" 2>/dev/null)
@@ -131,7 +132,7 @@ mkdir -p "$HOME_B/.claude"
 cat >"$HOME_B/.claude/settings.json" <<'JSON'
 {"model": "opus", "permissions": {"allow": ["Bash"]}}
 JSON
-run06 "$HOME_B" >/dev/null
+run14 "$HOME_B" >/dev/null
 model_kept=$(jq -r '.model' "$HOME_B/.claude/settings.json" 2>/dev/null)
 perm_kept=$(jq -r '.permissions.allow[0]' "$HOME_B/.claude/settings.json" 2>/dev/null)
 statusline_type=$(jq -r '.statusLine.type' "$HOME_B/.claude/settings.json" 2>/dev/null)
@@ -141,7 +142,7 @@ check "a .bak of the prior settings is kept" "yes" "$bak_present"
 
 # Case: second run -> already configured, file byte-for-byte unchanged.
 before_hash=$(sha256sum "$HOME_B/.claude/settings.json" | awk '{print $1}')
-second_out=$(run06 "$HOME_B")
+second_out=$(run14 "$HOME_B")
 after_hash=$(sha256sum "$HOME_B/.claude/settings.json" | awk '{print $1}')
 contains "second run reports already configured" "already configured" "$second_out"
 check "second run leaves settings.json unchanged" "$before_hash" "$after_hash"
@@ -503,21 +504,192 @@ check "case g: macOS, user on bash: chsh the user only, never root" \
 	"chsh -s $STUB_ZSH hclaro" "$(cat "$SUDO_LOG")"
 
 # ==============================================================================
-# 04-brew-packages.sh must sort before 06/08/11/13 and be committed executable
-# -- `dot self install` silently skips any restoration script that is not.
+# 08-gentle-ai-sync.sh -- nothing in the restore ever ran gentle-ai to turn the
+# state 06-gentle-ai-state.sh seeds into the actual agent assets, and gentle-ai
+# sync fails on opencode's cold first start (measured 97s bootstrap) unless
+# something warms it up first.
+# ==============================================================================
+echo
+echo "08-gentle-ai-sync.sh"
+
+SYNC_LOG="$SANDBOX/gentle-ai-sync.log"
+export SYNC_LOG
+mkdir -p "$SANDBOX/stub-08"
+
+cat >"$SANDBOX/stub-08/gentle-ai" <<'STUB'
+#!/usr/bin/env bash
+echo "$(basename "$0") $*" >>"$SYNC_LOG"
+exit "${GENTLE_AI_SYNC_EXIT:-0}"
+STUB
+
+cat >"$SANDBOX/stub-08/opencode" <<'STUB'
+#!/usr/bin/env bash
+echo "$(basename "$0") $*" >>"$SYNC_LOG"
+exit 0
+STUB
+
+cat >"$SANDBOX/stub-08/fnm" <<'STUB'
+#!/usr/bin/env bash
+echo "$(basename "$0") $*" >>"$SYNC_LOG"
+if [ "$1" = exec ] && [ "$2" = "--using=default" ]; then
+	shift 2
+	exec "$@"
+fi
+exit 0
+STUB
+
+cat >"$SANDBOX/stub-08/timeout" <<'STUB'
+#!/usr/bin/env bash
+echo "$(basename "$0") $*" >>"$SYNC_LOG"
+shift
+exec "$@"
+STUB
+
+chmod +x "$SANDBOX/stub-08/gentle-ai" "$SANDBOX/stub-08/opencode" \
+	"$SANDBOX/stub-08/fnm" "$SANDBOX/stub-08/timeout"
+
+FULL_PATH_08="$SANDBOX/stub-08:/usr/bin:/bin"
+
+mkdir -p "$SANDBOX/stub-08-no-opencode"
+ln -s "$SANDBOX/stub-08/gentle-ai" "$SANDBOX/stub-08-no-opencode/gentle-ai"
+ln -s "$SANDBOX/stub-08/fnm" "$SANDBOX/stub-08-no-opencode/fnm"
+ln -s "$SANDBOX/stub-08/timeout" "$SANDBOX/stub-08-no-opencode/timeout"
+NO_OPENCODE_PATH_08="$SANDBOX/stub-08-no-opencode:/usr/bin:/bin"
+
+mkdir -p "$SANDBOX/stub-08-no-gentle-ai"
+ln -s "$SANDBOX/stub-08/opencode" "$SANDBOX/stub-08-no-gentle-ai/opencode"
+ln -s "$SANDBOX/stub-08/fnm" "$SANDBOX/stub-08-no-gentle-ai/fnm"
+ln -s "$SANDBOX/stub-08/timeout" "$SANDBOX/stub-08-no-gentle-ai/timeout"
+NO_GENTLE_AI_PATH_08="$SANDBOX/stub-08-no-gentle-ai:/usr/bin:/bin"
+
+mkdir -p "$SANDBOX/stub-08-no-fnm"
+ln -s "$SANDBOX/stub-08/gentle-ai" "$SANDBOX/stub-08-no-fnm/gentle-ai"
+ln -s "$SANDBOX/stub-08/opencode" "$SANDBOX/stub-08-no-fnm/opencode"
+NO_FNM_PATH_08="$SANDBOX/stub-08-no-fnm:/usr/bin:/bin"
+
+run08() {
+	(
+		HOME="$1"
+		PATH="$2"
+		GENTLE_AI_SYNC_EXIT="${3:-0}"
+		GENTLE_AI_CANDIDATES="${4-/no/such/gentle-ai-a /no/such/gentle-ai-b}"
+		export HOME PATH GENTLE_AI_SYNC_EXIT GENTLE_AI_CANDIDATES SYNC_LOG
+		. "$SCRIPT_08"
+	) >"$SANDBOX/out08" 2>&1
+	echo $?
+}
+
+# Case (a): everything present -> opencode is warmed up BEFORE the fnm exec
+# gentle-ai sync call, with the exact args, and the sync succeeds.
+HOME_J="$SANDBOX/home-j"
+mkdir -p "$HOME_J/.gentle-ai"
+: >"$HOME_J/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_j=$(run08 "$HOME_J" "$FULL_PATH_08")
+out_j=$(cat "$SANDBOX/out08")
+check "case a: returns success" "0" "$status_j"
+contains "case a: reports the sync succeeded" "gentle-ai agent assets synced" "$out_j"
+fnm_call=$(grep '^fnm ' "$SYNC_LOG")
+check "case a: fnm gets the exact sync args" "fnm exec --using=default gentle-ai sync" "$fnm_call"
+gentle_ai_call=$(grep '^gentle-ai ' "$SYNC_LOG")
+check "case a: gentle-ai gets the exact sync args" "gentle-ai sync" "$gentle_ai_call"
+warmup_line=$(grep -n '^timeout 300 opencode debug config$' "$SYNC_LOG" | head -n1 | cut -d: -f1)
+sync_line=$(grep -n '^fnm exec --using=default gentle-ai sync$' "$SYNC_LOG" | head -n1 | cut -d: -f1)
+if [ -n "$warmup_line" ] && [ -n "$sync_line" ] && [ "$warmup_line" -lt "$sync_line" ]; then
+	order_ok=yes
+else
+	order_ok=no
+fi
+check "case a: opencode warm-up happens before the fnm exec gentle-ai sync call" "yes" "$order_ok"
+
+# Case (b): no opencode on PATH -> no warm-up call, sync still runs.
+HOME_K="$SANDBOX/home-k"
+mkdir -p "$HOME_K/.gentle-ai"
+: >"$HOME_K/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_k=$(run08 "$HOME_K" "$NO_OPENCODE_PATH_08")
+out_k=$(cat "$SANDBOX/out08")
+check "case b: returns success" "0" "$status_k"
+warmup_calls_k=$(grep -c 'opencode debug config' "$SYNC_LOG")
+check "case b: no opencode warm-up call is made" "0" "$warmup_calls_k"
+contains "case b: sync still runs" "gentle-ai agent assets synced" "$out_k"
+
+# Case (c): state.json missing -> skip, nothing on PATH is ever invoked.
+HOME_L="$SANDBOX/home-l"
+mkdir -p "$HOME_L"
+: >"$SYNC_LOG"
+status_l=$(run08 "$HOME_L" "$FULL_PATH_08")
+out_l=$(cat "$SANDBOX/out08")
+check "case c: returns success" "0" "$status_l"
+contains "case c: prints a skip message" "No gentle-ai state restored" "$out_l"
+calls_l=$(wc -l <"$SYNC_LOG" | tr -d ' ')
+check "case c: nothing is invoked" "0" "$calls_l"
+
+# Case (d): gentle-ai missing (and not found via the fallback candidates) ->
+# skip, nothing is invoked.
+HOME_M="$SANDBOX/home-m"
+mkdir -p "$HOME_M/.gentle-ai"
+: >"$HOME_M/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_m=$(run08 "$HOME_M" "$NO_GENTLE_AI_PATH_08")
+out_m=$(cat "$SANDBOX/out08")
+check "case d: returns success" "0" "$status_m"
+contains "case d: prints a skip message" "gentle-ai is not installed" "$out_m"
+calls_m=$(wc -l <"$SYNC_LOG" | tr -d ' ')
+check "case d: nothing is invoked" "0" "$calls_m"
+
+# Case (e): fnm missing -> skip message mentions 07-node.sh, nothing is invoked.
+HOME_N="$SANDBOX/home-n"
+mkdir -p "$HOME_N/.gentle-ai"
+: >"$HOME_N/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_n=$(run08 "$HOME_N" "$NO_FNM_PATH_08")
+out_n=$(cat "$SANDBOX/out08")
+check "case e: returns success" "0" "$status_n"
+contains "case e: skip message mentions 07-node.sh" "07-node.sh" "$out_n"
+calls_n=$(wc -l <"$SYNC_LOG" | tr -d ' ')
+check "case e: nothing is invoked" "0" "$calls_n"
+
+# Case (f): sync fails -> failure message naming the rerun command, status 0.
+HOME_O="$SANDBOX/home-o"
+mkdir -p "$HOME_O/.gentle-ai"
+: >"$HOME_O/.gentle-ai/state.json"
+: >"$SYNC_LOG"
+status_o=$(run08 "$HOME_O" "$FULL_PATH_08" 3)
+out_o=$(cat "$SANDBOX/out08")
+check "case f: still returns success" "0" "$status_o"
+contains "case f: prints a failure message" "gentle-ai sync failed" "$out_o"
+contains "case f: failure message names the rerun command" \
+	"fnm exec --using=default gentle-ai sync" "$out_o"
+
+# ==============================================================================
+# Case (g) / ordering -- 04-brew-packages.sh must sort before 06-gentle-ai-
+# state.sh, 07-node.sh, 08-gentle-ai-sync.sh, 11-codegraph.sh,
+# 12-agent-integrations.sh and 14-claude-statusline.sh, all must be committed
+# executable, and the renamed scripts' old names must be gone.
 # ==============================================================================
 echo
 echo "restoration_scripts ordering"
 
-ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|08|11|13)-')
+ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|11|12|14)-')
 expected_order="04-brew-packages.sh
-06-claude-statusline.sh
-08-node.sh
+06-gentle-ai-state.sh
+07-node.sh
+08-gentle-ai-sync.sh
 11-codegraph.sh
-13-engram-daemon.sh"
-check "04 sorts before 06, 08, 11 and 13" "$expected_order" "$ordered"
+12-agent-integrations.sh
+14-claude-statusline.sh"
+check "04 sorts before 06, 07, 08, 11, 12 and 14" "$expected_order" "$ordered"
 [ -x "$SCRIPT_04" ] && script_04_exec=yes || script_04_exec=no
 check "04-brew-packages.sh is executable" "yes" "$script_04_exec"
+[ -x "$SCRIPT_08" ] && script_08_exec=yes || script_08_exec=no
+check "08-gentle-ai-sync.sh is executable" "yes" "$script_08_exec"
+
+for _old_name in 06-claude-statusline.sh 07-gentle-ai-state.sh 08-node.sh; do
+	[ -e "$DOTFILES_PATH/restoration_scripts/$_old_name" ] && old_present=yes || old_present=no
+	check "$_old_name no longer exists" "no" "$old_present"
+done
+unset _old_name old_present
 
 echo
 if [ "$tests_failed" -eq 0 ]; then
