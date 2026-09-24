@@ -423,6 +423,30 @@ pgrep -af 'moshi-hook serve'                                   # exactly one pro
 Newly installed hooks do not reach an already-running agent session, which read
 its settings at startup. Only sessions opened afterwards pick them up.
 
+### 9.6 Tailscale: reachable without opening a port
+
+Moshi covers agent hooks and approvals; [Tailscale](https://tailscale.com) covers
+plain SSH from anywhere, without forwarding port 22 to the internet. Restoration
+script 16 installs it (Linux only -- macOS gets it from the app, and WSL uses the
+Windows client instead, since `tailscaled` inside WSL fights the Windows network
+stack) through the official installer, which adds Tailscale's own apt repository
+so later updates come through `apt upgrade` like everything else.
+
+Authentication stays manual on purpose -- it needs a browser login, and a
+restoration script must never block on one. After the restore, on the machine:
+
+```bash
+sudo tailscale up
+sudo tailscale set --operator="$(id -un)"   # run tailscale without sudo afterwards
+```
+
+`tailscale up` prints a URL; open it, and sign in to the tailnet. Then, in the
+[admin console](https://login.tailscale.com/admin/machines), disable key expiry
+for this machine so it does not silently drop off the tailnet later. Any other
+device on the same tailnet -- phone, laptop -- needs the Tailscale app installed
+and logged into that same account; once it is, `tailscale ip -4` on this machine
+gives the address to SSH to.
+
 ---
 
 ## 10. Code knowledge graph for every agent (CodeGraph)

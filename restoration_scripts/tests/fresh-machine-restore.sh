@@ -69,6 +69,7 @@ SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
 SCRIPT_12="$DOTFILES_PATH/restoration_scripts/12-agent-integrations.sh"
 SCRIPT_14="$DOTFILES_PATH/restoration_scripts/14-claude-statusline.sh"
 SCRIPT_15="$DOTFILES_PATH/restoration_scripts/15-rust.sh"
+SCRIPT_16="$DOTFILES_PATH/restoration_scripts/16-tailscale.sh"
 
 tests_run=0 tests_failed=0
 pass() { tests_run=$((tests_run + 1)); printf '  ok   %s\n' "$1"; }
@@ -1426,6 +1427,210 @@ contains "case j: prints a failure hint" \
 	"curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --profile default" "$out_15j"
 
 # ==============================================================================
+# 16-tailscale.sh -- installs Tailscale via the official installer on a
+# non-WSL Linux machine (order-independent, needs curl + passwordless sudo),
+# skips on Darwin and WSL, and never blocks on manual authentication.
+# ==============================================================================
+echo
+echo "16-tailscale.sh"
+
+mkdir -p "$SANDBOX/stub16" "$SANDBOX/tsbin16"
+TS_LOG="$SANDBOX/tailscale-install.log"
+TS_BIN_DIR="$SANDBOX/tsbin16"
+export TS_LOG TS_BIN_DIR
+
+cat > "$SANDBOX/stub16/uname" <<'STUB'
+#!/usr/bin/env bash
+echo "${TS_UNAME_S:-Linux}"
+STUB
+chmod +x "$SANDBOX/stub16/uname"
+
+cat > "$SANDBOX/stub16/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "sudo $*" >>"$TS_LOG"
+if [ "$1" = "-n" ]; then
+	[ "${TS_SUDO_PASSWORDLESS:-1}" = "1" ] && exit 0 || exit 1
+fi
+exit 0
+STUB
+chmod +x "$SANDBOX/stub16/sudo"
+
+cat > "$SANDBOX/stub16/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >>"$TS_LOG"
+dest="" prev=""
+for arg in "$@"; do
+	[ "$prev" = "-o" ] && dest="$arg"
+	prev="$arg"
+done
+[ "${TS_CURL_FAIL:-0}" = "1" ] && exit 1
+cat >"$dest" <<'INSTALLER'
+#!/usr/bin/env sh
+if [ -t 0 ]; then
+	echo "installer-stdin-tty" >>"$TS_LOG"
+else
+	echo "installer-stdin-not-tty" >>"$TS_LOG"
+fi
+mkdir -p "$TS_BIN_DIR"
+cat >"$TS_BIN_DIR/tailscale" <<'TSSTUB'
+#!/usr/bin/env bash
+echo "tailscale $*" >>"$TS_LOG"
+case "$1" in
+status) exit "${TS_STATUS_EXIT:-1}" ;;
+ip) echo "100.64.0.1" ;;
+esac
+TSSTUB
+chmod +x "$TS_BIN_DIR/tailscale"
+INSTALLER
+chmod +x "$dest"
+STUB
+chmod +x "$SANDBOX/stub16/curl"
+
+write_tailscale_stub() {
+	cat > "$TS_BIN_DIR/tailscale" <<'TSSTUB'
+#!/usr/bin/env bash
+echo "tailscale $*" >>"$TS_LOG"
+case "$1" in
+status) exit "${TS_STATUS_EXIT:-1}" ;;
+ip) echo "100.64.0.1" ;;
+esac
+TSSTUB
+	chmod +x "$TS_BIN_DIR/tailscale"
+}
+
+STUB16_PATH="$SANDBOX/tsbin16:$SANDBOX/stub16:/usr/bin:/bin"
+
+printf 'Linux version 6.8.0-49-generic (buildd@lcy02) #49-Ubuntu\n' > "$SANDBOX/proc-version-linux16"
+printf 'Linux version 5.15.153.1-microsoft-standard-WSL2\n' > "$SANDBOX/proc-version-wsl16"
+
+run16() {
+	(
+		HOME="$1"
+		PATH="$2"
+		TAILSCALE_PROC_VERSION_FILE="$3"
+		TAILSCALE_INSTALL_URL="${4:-https://tailscale.com/install.sh}"
+		TS_UNAME_S="${5:-Linux}"
+		export HOME PATH TAILSCALE_PROC_VERSION_FILE TAILSCALE_INSTALL_URL TS_UNAME_S \
+			TS_LOG TS_BIN_DIR TS_SUDO_PASSWORDLESS TS_CURL_FAIL TS_STATUS_EXIT
+		. "$SCRIPT_16"
+	) >"$SANDBOX/out16" 2>&1
+	echo $?
+}
+
+# Case (a): Darwin -> skip, nothing called.
+HOME_16A="$SANDBOX/home16a"
+mkdir -p "$HOME_16A"
+rm -f "$TS_BIN_DIR/tailscale"
+: >"$TS_LOG"
+export TS_SUDO_PASSWORDLESS=1 TS_STATUS_EXIT=1 TS_CURL_FAIL=0
+status_16a=$(run16 "$HOME_16A" "$STUB16_PATH" "$SANDBOX/proc-version-linux16" "" "Darwin")
+out_16a=$(cat "$SANDBOX/out16")
+check "case a: returns success" "0" "$status_16a"
+contains "case a: skips with the macOS message" \
+	" > Tailscale on macOS comes from its app; skipping" "$out_16a"
+calls_16a=$(wc -l <"$TS_LOG" | tr -d ' ')
+check "case a: nothing is called" "0" "$calls_16a"
+
+# Case (b): WSL -> skip, nothing called.
+HOME_16B="$SANDBOX/home16b"
+mkdir -p "$HOME_16B"
+rm -f "$TS_BIN_DIR/tailscale"
+: >"$TS_LOG"
+status_16b=$(run16 "$HOME_16B" "$STUB16_PATH" "$SANDBOX/proc-version-wsl16" "" "Linux")
+out_16b=$(cat "$SANDBOX/out16")
+check "case b: returns success" "0" "$status_16b"
+contains "case b: skips with the WSL message" \
+	" > WSL: use the Tailscale Windows client instead; skipping" "$out_16b"
+calls_16b=$(wc -l <"$TS_LOG" | tr -d ' ')
+check "case b: nothing is called" "0" "$calls_16b"
+
+# Case (c): Linux, no tailscale, passwordless sudo -> installer fetched from
+# TAILSCALE_INSTALL_URL, run with stdin redirected away from a tty, reports
+# installed, then prints the not-logged-in auth steps (status fails).
+HOME_16C="$SANDBOX/home16c"
+mkdir -p "$HOME_16C"
+rm -f "$TS_BIN_DIR/tailscale"
+: >"$TS_LOG"
+export TS_SUDO_PASSWORDLESS=1 TS_STATUS_EXIT=1 TS_CURL_FAIL=0
+status_16c=$(run16 "$HOME_16C" "$STUB16_PATH" "$SANDBOX/proc-version-linux16" \
+	"https://example.test/tailscale-install.sh" "Linux")
+out_16c=$(cat "$SANDBOX/out16")
+check "case c: returns success" "0" "$status_16c"
+curl_call_16c=$(grep '^curl ' "$TS_LOG")
+contains "case c: curl uses -fsSL" "-fsSL" "$curl_call_16c"
+contains "case c: curl fetches TAILSCALE_INSTALL_URL" "https://example.test/tailscale-install.sh" "$curl_call_16c"
+contains "case c: installer runs with stdin not a tty" "installer-stdin-not-tty" "$(cat "$TS_LOG")"
+contains "case c: reports installed" " > Tailscale installed" "$out_16c"
+contains "case c: prints the not-logged-in auth steps" \
+	" > Tailscale is installed but not logged in. Authenticate once (opens a browser URL):" "$out_16c"
+contains "case c: auth steps include sudo tailscale up" "sudo tailscale up" "$out_16c"
+contains "case c: auth steps include the operator line" \
+	"sudo tailscale set --operator=" "$out_16c"
+contains "case c: auth steps mention disabling key expiry" \
+	"disable key expiry for this machine so it stays reachable 24/7" "$out_16c"
+
+# Case (d): no tailscale, sudo needs a password -> manual curl command
+# printed, curl NOT called.
+HOME_16D="$SANDBOX/home16d"
+mkdir -p "$HOME_16D"
+rm -f "$TS_BIN_DIR/tailscale"
+: >"$TS_LOG"
+export TS_SUDO_PASSWORDLESS=0
+status_16d=$(run16 "$HOME_16D" "$STUB16_PATH" "$SANDBOX/proc-version-linux16" "" "Linux")
+out_16d=$(cat "$SANDBOX/out16")
+check "case d: returns success" "0" "$status_16d"
+contains "case d: reports sudo needs a password" \
+	" > Tailscale is not installed and sudo needs a password here. Run by hand:" "$out_16d"
+contains "case d: prints the manual install command" \
+	"curl -fsSL https://tailscale.com/install.sh | sh" "$out_16d"
+curl_calls_16d=$(grep -c '^curl ' "$TS_LOG")
+check "case d: curl is not called" "0" "$curl_calls_16d"
+
+# Case (e): tailscale present and status ok -> reports the tailnet IP, no curl.
+HOME_16E="$SANDBOX/home16e"
+mkdir -p "$HOME_16E"
+write_tailscale_stub
+: >"$TS_LOG"
+export TS_SUDO_PASSWORDLESS=1 TS_STATUS_EXIT=0
+status_16e=$(run16 "$HOME_16E" "$STUB16_PATH" "$SANDBOX/proc-version-linux16" "" "Linux")
+out_16e=$(cat "$SANDBOX/out16")
+check "case e: returns success" "0" "$status_16e"
+contains "case e: reports the tailnet IP" " > Tailscale is up: 100.64.0.1" "$out_16e"
+curl_calls_16e=$(grep -c '^curl ' "$TS_LOG")
+check "case e: curl is not called" "0" "$curl_calls_16e"
+
+# Case (f): tailscale present, status fails -> auth steps with sudo tailscale
+# up and the operator line.
+HOME_16F="$SANDBOX/home16f"
+mkdir -p "$HOME_16F"
+write_tailscale_stub
+: >"$TS_LOG"
+export TS_STATUS_EXIT=1
+status_16f=$(run16 "$HOME_16F" "$STUB16_PATH" "$SANDBOX/proc-version-linux16" "" "Linux")
+out_16f=$(cat "$SANDBOX/out16")
+check "case f: returns success" "0" "$status_16f"
+contains "case f: prints the not-logged-in auth steps" \
+	" > Tailscale is installed but not logged in. Authenticate once (opens a browser URL):" "$out_16f"
+contains "case f: auth steps include sudo tailscale up" "sudo tailscale up" "$out_16f"
+contains "case f: auth steps include the operator line" \
+	"sudo tailscale set --operator=" "$out_16f"
+curl_calls_16f=$(grep -c '^curl ' "$TS_LOG")
+check "case f: curl is not called" "0" "$curl_calls_16f"
+
+# Case (g): curl fails -> failure hint, status 0.
+HOME_16G="$SANDBOX/home16g"
+mkdir -p "$HOME_16G"
+rm -f "$TS_BIN_DIR/tailscale"
+: >"$TS_LOG"
+export TS_SUDO_PASSWORDLESS=1 TS_CURL_FAIL=1 TS_STATUS_EXIT=1
+status_16g=$(run16 "$HOME_16G" "$STUB16_PATH" "$SANDBOX/proc-version-linux16" "" "Linux")
+out_16g=$(cat "$SANDBOX/out16")
+check "case g: returns success" "0" "$status_16g"
+contains "case g: prints a failure hint" \
+	"curl -fsSL https://tailscale.com/install.sh | sh" "$out_16g"
+export TS_CURL_FAIL=0
+
+# ==============================================================================
 # Case (h) / ordering -- 04-brew-packages.sh must sort before 06-gentle-ai-
 # state.sh, 07-node.sh, 08-pi.sh, 09-gentle-ai-sync.sh, 10-moshi-remote.sh,
 # 11-codegraph.sh, 12-agent-integrations.sh and 14-claude-statusline.sh, the
@@ -1435,7 +1640,7 @@ contains "case j: prints a failure hint" \
 echo
 echo "restoration_scripts ordering"
 
-ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|09|10|11|12|14|15)-')
+ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|09|10|11|12|14|15|16)-')
 expected_order="04-brew-packages.sh
 06-gentle-ai-state.sh
 07-node.sh
@@ -1445,10 +1650,13 @@ expected_order="04-brew-packages.sh
 11-codegraph.sh
 12-agent-integrations.sh
 14-claude-statusline.sh
-15-rust.sh"
-check "04 sorts before 06, 07, 08, 09, 10, 11, 12, 14 and 15" "$expected_order" "$ordered"
+15-rust.sh
+16-tailscale.sh"
+check "case h: 04 sorts before 06, 07, 08, 09, 10, 11, 12, 14, 15 and 16-tailscale.sh sorts last" "$expected_order" "$ordered"
 [ -x "$SCRIPT_15" ] && script_15_exec=yes || script_15_exec=no
 check "15-rust.sh is executable" "yes" "$script_15_exec"
+[ -x "$SCRIPT_16" ] && script_16_exec=yes || script_16_exec=no
+check "case h: 16-tailscale.sh is executable" "yes" "$script_16_exec"
 [ -x "$SCRIPT_04" ] && script_04_exec=yes || script_04_exec=no
 check "04-brew-packages.sh is executable" "yes" "$script_04_exec"
 [ -x "$SCRIPT_08" ] && script_08_exec=yes || script_08_exec=no
