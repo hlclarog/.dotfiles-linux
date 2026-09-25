@@ -193,6 +193,24 @@ chmod +x "$SANDBOX/stub"/*
 PATH="$SANDBOX/stub:$PATH"
 export PATH
 
+# zerotier-cli lives in a separate directory, NOT on the default PATH: tests
+# that need it "present" prepend $SANDBOX/stub-zt just for that one
+# run_secrets call, so every other test keeps seeing it as genuinely missing.
+mkdir -p "$SANDBOX/stub-zt"
+cat >"$SANDBOX/stub-zt/zerotier-cli" <<'STUB'
+#!/usr/bin/env bash
+echo "zerotier-cli $*" >>"$LOG_DIR/zerotier-cli.log"
+if [ "${1:-}" = listnetworks ]; then
+	if [ "${ZT_NETWORK_STATUS:-NONE}" = OK ]; then
+		echo "200 listnetworks 0123456789abcdef fakenet 00:00:00:00:00 OK PRIVATE zt0 10.147.17.5/24"
+	else
+		echo "200 listnetworks 0123456789abcdef fakenet 00:00:00:00:00 REQUESTING_CONFIGURATION PRIVATE zt0 -"
+	fi
+fi
+exit 0
+STUB
+chmod +x "$SANDBOX/stub-zt/zerotier-cli"
+
 # --- helpers -------------------------------------------------------------------
 # Fresh, empty HOME/log dir/fixture DOTFILES_PATH per test so nothing leaks
 # between cases; every controllable stub env var is reset to "unset" first so a
@@ -205,6 +223,7 @@ reset_test_env() {
 	# read in the script under test.
 	export GH_STATUS="" CODEX_STATUS="" CLAUDE_LOGGED_IN="" ENGRAM_READY="" ENGRAM_UNIT_EXISTS=""
 	export TAILSCALE_STATUS="" SSH_GH_OK="" LOGIN_SHELL="" FAKE_UNAME="" MOSHI_STATUS_LINE=""
+	export ZT_NETWORK_STATUS=""
 	export POST_RESTORE_ONLY="" POST_RESTORE_PROC_VERSION_FILE="" SSHD_DROPIN_DIR=""
 	TEST_HOME=$(mktemp -d)
 	LOG_DIR=$(mktemp -d)
@@ -268,8 +287,11 @@ echo "some-key" >"$TEST_HOME/.ssh/authorized_keys"
 run_secrets "" --check
 check "everything-done exit code is 0" "0" "$RC"
 done_count=$(printf '%s' "$OUTPUT" | grep -c '✓')
-check "everything-done: every one of the 11 steps shows ✓" "11" "$done_count"
+check "everything-done: every one of the 11 required steps shows ✓" "11" "$done_count"
 not_contains "everything-done: no row says pending" "pending" "$OUTPUT"
+contains "everything-done: zerotier is untouched and optional, not configured" \
+	"optional (not configured)" "$OUTPUT"
+check "everything-done: zerotier-cli was never even probed" "" "$(log_of zerotier-cli)"
 
 echo
 # ==============================================================================
@@ -309,6 +331,7 @@ check "no tailscale up was attempted" "" "$(log_of tailscale | grep -v '^tailsca
 check "sudo was never called" "" "$(log_of sudo)"
 check "systemctl was never called" "" "$(log_of systemctl)"
 check "moshi-hook pairing was never run" "" "$(log_of moshi-hook | grep -vE '^moshi-hook status$' || true)"
+check "zerotier-cli was never touched" "" "$(log_of zerotier-cli)"
 
 echo
 # ==============================================================================
@@ -440,6 +463,148 @@ FAKE_UNAME=Darwin
 run_secrets "" --check
 contains "tailscale is skipped on Darwin" "skip" "$OUTPUT"
 check "Darwin skip does not fail --check" "0" "$RC"
+
+echo
+# ==============================================================================
+# zerotier: strictly optional fallback. It must never be counted as pending
+# and must never affect the exit code, whether or not zerotier-cli is even
+# installed.
+# ==============================================================================
+echo "zerotier: --check without zerotier-cli is optional, not pending"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+run_secrets "" --check
+contains "zerotier reports optional, not configured" "optional (not configured)" "$OUTPUT"
+not_contains "zerotier is never reported as pending" "pending" "$OUTPUT"
+check "a missing zerotier-cli does not fail --check" "0" "$RC"
+
+echo "zerotier: --check with an OK network shows ✓"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+ZT_NETWORK_STATUS=OK
+PATH="$SANDBOX/stub-zt:$PATH" run_secrets "" --check
+contains "zerotier shows ✓ once an OK network is joined" "✓" "$OUTPUT"
+check "an OK network keeps --check at exit 0" "0" "$RC"
+
+echo
+# ==============================================================================
+# zerotier: skipped on WSL and Darwin, exactly like tailscale, with no calls
+# ==============================================================================
+echo "zerotier: platform skip"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 5.15.0-microsoft-standard-WSL2\n' >"$SANDBOX/proc-version-wsl"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-wsl"
+export POST_RESTORE_PROC_VERSION_FILE
+run_secrets "" --check
+contains "zerotier is skipped on WSL" "skip" "$OUTPUT"
+check "WSL skip does not fail --check" "0" "$RC"
+check "zerotier-cli was never even probed on WSL" "" "$(log_of zerotier-cli)"
+
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+FAKE_UNAME=Darwin
+run_secrets "" --check
+contains "zerotier is skipped on Darwin" "skip" "$OUTPUT"
+check "Darwin skip does not fail --check" "0" "$RC"
+check "zerotier-cli was never even probed on Darwin" "" "$(log_of zerotier-cli)"
+
+echo
+# ==============================================================================
+# zerotier: interactive Enter/"n" -- the default is NO, and nothing at all
+# runs: no curl, no sudo, no zerotier-cli.
+# ==============================================================================
+echo "zerotier: Enter (default) declines"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+run_secrets "
+"
+check "no curl ran" "" "$(log_of curl)"
+check "no sudo ran" "" "$(log_of sudo)"
+check "no zerotier-cli ran" "" "$(log_of zerotier-cli)"
+
+echo "zerotier: explicit 'n' declines"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+run_secrets "n
+"
+check "no curl ran" "" "$(log_of curl)"
+check "no sudo ran" "" "$(log_of sudo)"
+check "no zerotier-cli ran" "" "$(log_of zerotier-cli)"
+
+echo
+# ==============================================================================
+# zerotier: 'y' with zerotier-cli missing offers the official installer,
+# downloaded with curl -fsSL to a temp file and run with `sudo bash`.
+# ==============================================================================
+echo "zerotier: 'y' + missing zerotier-cli runs the official installer"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+run_secrets "y
+y
+"
+contains "the official installer is fetched with curl -fsSL" \
+	"curl -fsSL https://install.zerotier.com" "$(log_of curl)"
+sudo_bash_line=$(log_of sudo | grep -E '^sudo bash /' || true)
+check "sudo bash ran against the downloaded installer file" "yes" "$([ -n "$sudo_bash_line" ] && echo yes || echo no)"
+check "zerotier-cli itself was never invoked (still not installed)" "" "$(log_of zerotier-cli)"
+
+echo
+# ==============================================================================
+# zerotier: a valid 16-hex-digit network ID runs exactly one join command
+# ==============================================================================
+echo "zerotier: valid network ID joins"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+PATH="$SANDBOX/stub-zt:$PATH" run_secrets "y
+0123456789abcdef
+"
+contains "sudo zerotier-cli join ran with the exact network ID" \
+	"sudo zerotier-cli join 0123456789abcdef" "$(log_of sudo)"
+
+echo
+# ==============================================================================
+# zerotier: an invalid network ID, re-asked once and still invalid, never
+# joins anything
+# ==============================================================================
+echo "zerotier: invalid network ID twice skips the join"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+PATH="$SANDBOX/stub-zt:$PATH" run_secrets "y
+not-hex
+still-not-hex
+"
+not_contains "no join command was ever attempted" "join" "$(log_of sudo)"
+
+echo
+# ==============================================================================
+# POST_RESTORE_ONLY=zerotier runs only zerotier, nothing else is even probed
+# ==============================================================================
+echo "POST_RESTORE_ONLY=zerotier"
+reset_test_env
+POST_RESTORE_ONLY=zerotier
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+run_secrets "n
+"
+check "gh was never touched" "" "$(log_of gh)"
+check "tailscale was never touched" "" "$(log_of tailscale)"
+check "claude was never touched" "" "$(log_of claude)"
+check "moshi-hook was never touched" "" "$(log_of moshi-hook)"
 
 echo
 # ==============================================================================
