@@ -1,0 +1,619 @@
+#!/usr/bin/env bash
+# One-shot, standalone bootstrap for a freshly installed Ubuntu 24.04 Server
+# VM (or WSL), run BEFORE the dotfiles exist on the machine:
+#
+#   curl -fsSLo bootstrap-linux https://raw.githubusercontent.com/hlclarog/.dotfiles-linux/master/scripts/bootstrap-linux
+#   bash bootstrap-linux [--check] [--skip-brew] [--timezone <Zone>]
+#
+# It is fully SELF-CONTAINED on purpose: it never sources or reads any other
+# file from this repository, because the whole point is to run before that
+# repository is even cloned. It is interactive (sudo password prompts are
+# expected) and safe to rerun -- every step detects its own state first and
+# only does work when something is actually missing.
+#
+# Why the server-only steps exist:
+#   - disk: the Ubuntu Server installer's guided LVM layout allocates only
+#     part of the volume group to the root logical volume and leaves the rest
+#     unallocated, so a fresh install can be using a fraction of the disk.
+#   - zram: a 6 GB RAM VM is tight; zram trades a little CPU for compressed
+#     RAM-backed swap, which is far cheaper than the installer's disk swap
+#     file. That disk swap is kept as a lower-priority fallback, not removed.
+#   - guest-agent: qemu-guest-agent is what lets the Mac host (UTM) shut this
+#     VM down cleanly and query its IP with `utmctl`; without it the host can
+#     only hard-kill the VM.
+#   - timezone: the installer defaults to UTC and does not ask again later,
+#     so log timestamps stay wrong until this is set once by hand.
+# None of the above applies inside WSL, which has no separate disk to grow,
+# manages its own memory, is not a QEMU/UTM guest, and follows the Windows
+# host's clock -- those steps are skipped there with a one-line reason.
+set -u
+
+if [ "$(id -u)" = "0" ]; then
+	echo "bootstrap-linux must not run as root; run it as your normal user (it calls sudo itself when needed)." >&2
+	exit 1
+fi
+
+if [ "$(uname -s)" != "Linux" ]; then
+	echo "bootstrap-linux only runs on Linux (uname -s must be Linux)." >&2
+	exit 1
+fi
+
+CHECK_ONLY=0
+SKIP_BREW=0
+TIMEZONE="${BOOTSTRAP_TIMEZONE:-America/Bogota}"
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--check)
+		CHECK_ONLY=1
+		shift
+		;;
+	--skip-brew)
+		SKIP_BREW=1
+		shift
+		;;
+	--timezone)
+		TIMEZONE="${2:?--timezone requires a zone}"
+		shift 2
+		;;
+	*)
+		echo "Unknown argument: $1" >&2
+		exit 2
+		;;
+	esac
+done
+
+LINUXBREW_PREFIX="${LINUXBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"
+BREW_BIN="$LINUXBREW_PREFIX/bin/brew"
+RESTORER_URL="https://raw.githubusercontent.com/CodelyTV/dotly/HEAD/restorer"
+
+STEP_ORDER=(apt disk zram guest-agent timezone sshd brew restore)
+declare -A RESULT=()
+
+is_int() {
+	case "$1" in
+	'' | *[!0-9]*) return 1 ;;
+	*) return 0 ;;
+	esac
+}
+
+is_wsl() {
+	grep -qi microsoft "${BOOTSTRAP_PROC_VERSION_FILE:-/proc/version}" 2>/dev/null
+}
+
+have_tty() { (exec 3</dev/tty) 2>/dev/null; }
+
+ask_yn() {
+	local prompt="$1" default="${2:-N}" reply suffix
+	suffix="[y/N]"
+	[ "$default" = "Y" ] && suffix="[Y/n]"
+	if have_tty; then
+		exec 3</dev/tty
+		read -r -p "$prompt $suffix " reply <&3
+		exec 3<&-
+	else
+		printf '%s %s ' "$prompt" "$suffix"
+		read -r reply
+	fi
+	[ -z "$reply" ] && reply="$default"
+	case "$reply" in
+	[Yy]*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# pv_to_disk_and_part <device> -- sets DISK_DEV and DISK_PART for the parent
+# disk and partition number of a partition device (works for both /dev/sdaN
+# and /dev/nvme0n1pN layouts, unlike hand-rolled string trimming).
+# -d matters: without it lsblk also lists the partition's LVM child, so PKNAME
+# printed "sda" and then "sda3" on the real VM.
+pv_to_disk_and_part() {
+	local pv="$1" pkname
+	pkname=$(lsblk -ndo PKNAME "$pv" 2>/dev/null | tr -d ' ')
+	DISK_DEV="/dev/$pkname"
+	DISK_PART=$(lsblk -ndo PARTN "$pv" 2>/dev/null | tr -d ' ')
+}
+
+# --- step 1: apt -------------------------------------------------------------
+step_apt() {
+	echo "-- apt: system prerequisites --"
+	local pkgs="build-essential curl file git zsh unzip python-is-python3 openssh-server zram-tools cloud-guest-utils qemu-guest-agent"
+	local pkg missing
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		missing=0
+		for pkg in $pkgs; do
+			dpkg -s "$pkg" >/dev/null 2>&1 || missing=1
+		done
+		[ "$missing" = 0 ] && RESULT[apt]=ok || RESULT[apt]=pending
+		return
+	fi
+
+	sudo -v
+	sudo apt-get update
+	sudo DEBIAN_FRONTEND=noninteractive apt-get full-upgrade -y
+	# shellcheck disable=SC2086 # $pkgs is a fixed, script-defined list of package names
+	sudo DEBIAN_FRONTEND=noninteractive apt-get install -y $pkgs
+
+	missing=0
+	for pkg in $pkgs; do
+		dpkg -s "$pkg" >/dev/null 2>&1 || missing=1
+	done
+	if [ "$missing" = 0 ]; then
+		RESULT[apt]=ok
+		echo "✓ apt: all prerequisites installed"
+	else
+		RESULT[apt]=pending
+		echo "  hint: some packages failed to install; check network/apt sources, then rerun: sudo apt-get install -y $pkgs"
+	fi
+}
+
+# --- step 2: disk -------------------------------------------------------------
+GIB=1073741824
+
+# priv_read <cmd...> -- runs a read-only privileged command: directly as
+# root, else via cached `sudo -n` if it is usable, else fails with exit 2 to
+# signal "no privilege available" without ever prompting for a password.
+priv_read() {
+	if [ "$(id -u)" = "0" ]; then
+		"$@"
+		return $?
+	fi
+	if sudo -n true 2>/dev/null; then
+		sudo -n "$@"
+		return $?
+	fi
+	return 2
+}
+
+# mapper_to_vg_lv <name-under-/dev/mapper/> -- sets VG_NAME and LV_NAME by
+# reversing device-mapper's escaping ("--" is a literal "-"; the first
+# unescaped "-" separates VG from LV), so the VG name can be recovered from
+# findmnt's output alone, with no lvs/vgs call at all.
+mapper_to_vg_lv() {
+	local name="$1" placeholder=$'\x01' escaped
+	escaped="${name//--/$placeholder}"
+	VG_NAME="${escaped%%-*}"
+	LV_NAME="${escaped#*-}"
+	VG_NAME="${VG_NAME//$placeholder/-}"
+	LV_NAME="${LV_NAME//$placeholder/-}"
+}
+
+# disk_step_lvm_estimate <root-src> -- read-only fallback used when no sudo
+# privilege is available (typically --check without cached sudo): estimates
+# unallocated VG space from lsblk alone (PV partition size minus the size of
+# its LVM children), since lvs/vgs/pvs all require root to read LVM locks.
+disk_step_lvm_estimate() {
+	local root_src="$1" vg pv_part pv_size lv_sum free_est gib_est
+
+	mapper_to_vg_lv "${root_src#/dev/mapper/}"
+	vg="$VG_NAME"
+	# PKNAME is empty for a device-mapper node, so walk the tree upwards (-s)
+	# and take the first partition: LV -> sda3 -> sda.
+	pv_part=$(lsblk -slno NAME,TYPE "$root_src" 2>/dev/null | awk '$2 == "part" { print $1; exit }')
+
+	RESULT[disk]=pending
+	if [ -z "$pv_part" ] || [ -z "$vg" ]; then
+		echo "  pending: could not estimate free space without sudo; run with cached sudo (or without --check) to check the disk."
+		return
+	fi
+
+	pv_size=$(lsblk -bndo SIZE "/dev/$pv_part" 2>/dev/null | tr -d ' ')
+	is_int "$pv_size" || pv_size=0
+	lv_sum=$(lsblk -bno SIZE,TYPE "/dev/$pv_part" 2>/dev/null | awk '$2 == "lvm" { sum += $1 } END { print sum + 0 }')
+	is_int "$lv_sum" || lv_sum=0
+
+	free_est=$((pv_size - lv_sum))
+	[ "$free_est" -lt 0 ] && free_est=0
+
+	if [ "$free_est" -gt "$GIB" ]; then
+		gib_est=$((free_est / GIB))
+		echo "  pending: about ${gib_est} GiB unallocated in $vg (estimated with lsblk; run without --check to extend; partition growth unknown without sudo)"
+	else
+		echo "  pending: could not confirm free space in $vg without sudo (estimated with lsblk; run without --check to check the disk; partition growth unknown without sudo)"
+	fi
+}
+
+disk_step_lvm() {
+	local root_src="$1" vg free_bytes pv need_growpart=0
+	local vg_raw priv_rc free_raw
+
+	vg_raw=$(priv_read lvs --noheadings -o vg_name "$root_src" 2>/dev/null)
+	priv_rc=$?
+	if [ "$priv_rc" = 2 ]; then
+		disk_step_lvm_estimate "$root_src"
+		return
+	fi
+	vg=$(printf '%s' "$vg_raw" | tr -d ' ')
+
+	free_raw=$(priv_read vgs --noheadings --units b -o vg_free "$vg" 2>/dev/null | tr -d ' B')
+	if [ -z "$vg" ] || ! is_int "$free_raw"; then
+		RESULT[disk]=pending
+		echo "  pending: could not read the volume group's free space (lvs/vgs failed even with sudo); check LVM by hand."
+		return
+	fi
+	free_bytes="$free_raw"
+
+	pv=$(priv_read pvs --noheadings -o pv_name --select "vg_name=$vg" 2>/dev/null | awk '{print $1; exit}')
+	if [ -n "$pv" ]; then
+		pv_to_disk_and_part "$pv"
+		if priv_read growpart --dry-run "$DISK_DEV" "$DISK_PART" 2>&1 | grep -q '^NOCHANGE'; then
+			need_growpart=0
+		else
+			need_growpart=1
+		fi
+	fi
+
+	if [ "$need_growpart" = 0 ] && [ "$free_bytes" -le "$GIB" ]; then
+		RESULT[disk]=ok
+		echo "✓ disk: root logical volume already uses the whole disk"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[disk]=pending
+		return
+	fi
+
+	echo "  before: $(df -h / | tail -1)"
+	sudo -v
+	if [ "$need_growpart" = 1 ]; then
+		sudo growpart "$DISK_DEV" "$DISK_PART"
+		sudo pvresize "$pv"
+		free_bytes=$(priv_read vgs --noheadings --units b -o vg_free "$vg" 2>/dev/null | tr -d ' B')
+		is_int "$free_bytes" || free_bytes=0
+	fi
+	if [ "$free_bytes" -gt "$GIB" ]; then
+		sudo lvextend -r -l +100%FREE "$root_src"
+	fi
+	echo "  after:  $(df -h / | tail -1)"
+	RESULT[disk]=ok
+}
+
+disk_step_partition() {
+	local root_src="$1" fstype
+
+	pv_to_disk_and_part "$root_src"
+	fstype=$(findmnt -no FSTYPE / 2>/dev/null)
+
+	if growpart --dry-run "$DISK_DEV" "$DISK_PART" 2>&1 | grep -q '^NOCHANGE'; then
+		RESULT[disk]=ok
+		echo "✓ disk: root partition already uses the whole disk"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[disk]=pending
+		return
+	fi
+
+	echo "  before: $(df -h / | tail -1)"
+	sudo -v
+	sudo growpart "$DISK_DEV" "$DISK_PART"
+	if [ "$fstype" = "ext4" ]; then
+		sudo resize2fs "$root_src"
+	else
+		echo "  hint: root filesystem is $fstype, not ext4; grow it by hand (e.g. xfs_growfs)."
+	fi
+	echo "  after:  $(df -h / | tail -1)"
+	RESULT[disk]=ok
+}
+
+step_disk() {
+	echo "-- disk: grow the root filesystem to use the whole disk --"
+	if is_wsl; then
+		RESULT[disk]="skip:WSL"
+		echo "  WSL detected: disk step skipped (WSL has no separate disk to grow)"
+		return
+	fi
+
+	local root_src
+	root_src=$(findmnt -no SOURCE / 2>/dev/null)
+
+	case "$root_src" in
+	/dev/mapper/*)
+		disk_step_lvm "$root_src"
+		;;
+	*)
+		disk_step_partition "$root_src"
+		;;
+	esac
+}
+
+# --- step 3: zram --------------------------------------------------------------
+ZRAM_DEFAULTS_FILE="${ZRAM_DEFAULTS_FILE:-/etc/default/zramswap}"
+SYSCTL_ZRAM_FILE="${SYSCTL_ZRAM_FILE:-/etc/sysctl.d/99-zram.conf}"
+
+render_zram_defaults() {
+	local src="/dev/null"
+	[ -f "$ZRAM_DEFAULTS_FILE" ] && src="$ZRAM_DEFAULTS_FILE"
+	awk '
+		/^ALGO=/     { print "ALGO=zstd";     seen_algo=1;     next }
+		/^PERCENT=/  { print "PERCENT=50";    seen_percent=1;  next }
+		/^PRIORITY=/ { print "PRIORITY=100";  seen_priority=1; next }
+		{ print }
+		END {
+			if (!seen_algo)     print "ALGO=zstd"
+			if (!seen_percent)  print "PERCENT=50"
+			if (!seen_priority) print "PRIORITY=100"
+		}
+	' "$src"
+}
+
+render_zram_sysctl() {
+	cat <<'EOF'
+# zram is RAM-backed, so the kernel should prefer it over dropping page cache.
+vm.swappiness=180
+# readahead is pointless for compressed RAM.
+vm.page-cluster=0
+EOF
+}
+
+step_zram() {
+	echo "-- zram: compressed RAM swap --"
+	if is_wsl; then
+		RESULT[zram]="skip:WSL"
+		echo "  WSL detected: zram step skipped (WSL manages its own memory/swap)"
+		return
+	fi
+
+	local wanted_defaults wanted_sysctl files_ok=1 zram_active=0
+
+	wanted_defaults=$(render_zram_defaults)
+	wanted_sysctl=$(render_zram_sysctl)
+	[ "$wanted_defaults" = "$(cat "$ZRAM_DEFAULTS_FILE" 2>/dev/null)" ] || files_ok=0
+	[ "$wanted_sysctl" = "$(cat "$SYSCTL_ZRAM_FILE" 2>/dev/null)" ] || files_ok=0
+	case "$(swapon --show 2>/dev/null)" in
+	*zram*) zram_active=1 ;;
+	esac
+
+	if [ "$files_ok" = 1 ] && [ "$zram_active" = 1 ]; then
+		RESULT[zram]=ok
+		echo "✓ zram: configured and active"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[zram]=pending
+		return
+	fi
+
+	sudo -v
+	local changed=0 tmp
+	if [ "$wanted_defaults" != "$(cat "$ZRAM_DEFAULTS_FILE" 2>/dev/null)" ]; then
+		tmp=$(mktemp)
+		printf '%s\n' "$wanted_defaults" >"$tmp"
+		sudo install -m 644 "$tmp" "$ZRAM_DEFAULTS_FILE"
+		rm -f "$tmp"
+		changed=1
+	fi
+	if [ "$wanted_sysctl" != "$(cat "$SYSCTL_ZRAM_FILE" 2>/dev/null)" ]; then
+		tmp=$(mktemp)
+		printf '%s\n' "$wanted_sysctl" >"$tmp"
+		sudo install -m 644 "$tmp" "$SYSCTL_ZRAM_FILE"
+		rm -f "$tmp"
+		changed=1
+	fi
+
+	sudo systemctl enable --now zramswap.service
+	[ "$changed" = 1 ] && sudo systemctl restart zramswap.service
+	sudo sysctl --system >/dev/null
+
+	case "$(swapon --show 2>/dev/null)" in
+	*zram*)
+		RESULT[zram]=ok
+		echo "✓ zram: configured and active"
+		;;
+	*)
+		RESULT[zram]=pending
+		echo "  hint: no /dev/zram device in 'swapon --show'; check 'systemctl status zramswap.service'."
+		;;
+	esac
+}
+
+# --- step 4: guest-agent -------------------------------------------------------
+step_guest_agent() {
+	echo "-- guest-agent: QEMU guest agent (lets the Mac host shut this VM down cleanly and query its IP with utmctl) --"
+	if is_wsl; then
+		RESULT[guest-agent]="skip:WSL"
+		echo "  WSL detected: guest-agent step skipped (not a QEMU/UTM guest)"
+		return
+	fi
+
+	if systemctl is-active --quiet qemu-guest-agent 2>/dev/null; then
+		RESULT[guest-agent]=ok
+		echo "✓ guest-agent: qemu-guest-agent is active"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[guest-agent]=pending
+		return
+	fi
+
+	sudo -v
+	sudo systemctl start qemu-guest-agent
+	if systemctl is-active --quiet qemu-guest-agent 2>/dev/null; then
+		RESULT[guest-agent]=ok
+		echo "✓ guest-agent: qemu-guest-agent started"
+	else
+		RESULT[guest-agent]=pending
+		echo "  hint: qemu-guest-agent did not start; enable the QEMU guest agent / virtio serial device for this VM in UTM, then rerun."
+	fi
+}
+
+# --- step 5: timezone ----------------------------------------------------------
+step_timezone() {
+	echo "-- timezone --"
+	if is_wsl; then
+		RESULT[timezone]="skip:WSL"
+		echo "  WSL detected: timezone step skipped (WSL follows the Windows host clock)"
+		return
+	fi
+
+	local current
+	current=$(timedatectl show -p Timezone --value 2>/dev/null)
+	if [ "$current" = "$TIMEZONE" ]; then
+		RESULT[timezone]=ok
+		echo "✓ timezone: already $TIMEZONE"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[timezone]=pending
+		return
+	fi
+
+	if ! timedatectl list-timezones 2>/dev/null | grep -qx "$TIMEZONE"; then
+		RESULT[timezone]=pending
+		echo "  hint: '$TIMEZONE' is not a recognized zone (see: timedatectl list-timezones)."
+		return
+	fi
+
+	sudo -v
+	sudo timedatectl set-timezone "$TIMEZONE"
+	current=$(timedatectl show -p Timezone --value 2>/dev/null)
+	if [ "$current" = "$TIMEZONE" ]; then
+		RESULT[timezone]=ok
+		echo "✓ timezone: set to $TIMEZONE"
+	else
+		RESULT[timezone]=pending
+	fi
+}
+
+# --- step 6: sshd ---------------------------------------------------------------
+step_sshd() {
+	echo "-- sshd: ssh server for remote access --"
+	if ss -tln 2>/dev/null | grep -Eq '(:|\.)22[[:space:]]'; then
+		RESULT[sshd]=ok
+		echo "✓ sshd: already listening on :22"
+	else
+		if [ "$CHECK_ONLY" = 1 ]; then
+			RESULT[sshd]=pending
+		else
+			sudo -v
+			sudo systemctl enable --now ssh
+			RESULT[sshd]=ok
+		fi
+	fi
+	echo "  Not hardening sshd here; the dotfiles restore does that once authorized_keys exists."
+}
+
+# --- step 7: brew ----------------------------------------------------------------
+step_brew() {
+	echo "-- brew: Homebrew for Linux --"
+	if [ "$SKIP_BREW" = 1 ]; then
+		RESULT[brew]="skip:--skip-brew"
+		echo "  --skip-brew: skipping"
+		return
+	fi
+
+	if [ -x "$BREW_BIN" ]; then
+		RESULT[brew]=ok
+		echo "✓ brew: already installed"
+	else
+		if [ "$CHECK_ONLY" = 1 ]; then
+			RESULT[brew]=pending
+			return
+		fi
+		sudo -v
+		local installer
+		installer=$(mktemp)
+		curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh -o "$installer"
+		NONINTERACTIVE=1 /bin/bash "$installer"
+		rm -f "$installer"
+		RESULT[brew]=ok
+	fi
+
+	[ -x "$BREW_BIN" ] && eval "$("$BREW_BIN" shellenv)"
+}
+
+# --- step 8: restore --------------------------------------------------------------
+print_restore_instructions() {
+	local cmd="$1"
+	echo
+	echo "GitHub user: hlclarog"
+	echo "repository: .dotfiles-linux"
+	echo "When it asks, answer Y at the package import prompt."
+	echo
+	echo "  $cmd"
+	echo
+	echo "Afterwards run: ~/.dotfiles/scripts/post-restore-secrets"
+	echo "Then log out and back in so the login shell change applies."
+}
+
+step_restore() {
+	echo "-- restore: Dotly's restorer --"
+	local restorer_cmd="bash <(curl -fsSL $RESTORER_URL)"
+	[ -d "$HOME/.dotfiles" ] && restorer_cmd="$restorer_cmd --continue"
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[restore]="skip:manual"
+		return
+	fi
+
+	if ask_yn "Launch Dotly's restorer now?" N; then
+		print_restore_instructions "$restorer_cmd"
+		local tmp
+		tmp=$(mktemp)
+		curl -fsSL "$RESTORER_URL" -o "$tmp"
+		if [ -d "$HOME/.dotfiles" ]; then
+			bash "$tmp" --continue
+		else
+			bash "$tmp"
+		fi
+		rm -f "$tmp"
+		RESULT[restore]=ok
+	else
+		print_restore_instructions "$restorer_cmd"
+		RESULT[restore]="skip:deferred"
+	fi
+}
+
+# --- summary ------------------------------------------------------------------
+render_status() {
+	case "$1" in
+	ok) echo "✓ done" ;;
+	pending) echo "pending" ;;
+	skip:*) echo "skip (${1#skip:})" ;;
+	*) echo "pending" ;;
+	esac
+}
+
+print_summary() {
+	echo
+	printf '%-14s %s\n' "STEP" "STATUS"
+	local id
+	for id in "${STEP_ORDER[@]}"; do
+		printf '%-14s %s\n' "$id" "$(render_status "${RESULT[$id]:-pending}")"
+	done
+}
+
+summary_exit_code() {
+	local id
+	for id in "${STEP_ORDER[@]}"; do
+		case "${RESULT[$id]:-pending}" in
+		pending) return 1 ;;
+		esac
+	done
+	return 0
+}
+
+main() {
+	[ "$CHECK_ONLY" = 1 ] || sudo -v
+
+	step_apt
+	step_disk
+	step_zram
+	step_guest_agent
+	step_timezone
+	step_sshd
+	step_brew
+	step_restore
+
+	print_summary
+	summary_exit_code
+}
+
+main
+exit $?

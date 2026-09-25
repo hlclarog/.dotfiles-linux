@@ -9,6 +9,40 @@ longer need a separate, ordered `dot package import` beforehand.
 
 ---
 
+## Linux server VM: bootstrap first
+
+On a fresh Ubuntu Server VM (nothing installed yet, not even the dotfiles),
+run this one line first:
+
+```bash
+curl -fsSLo bootstrap-linux https://raw.githubusercontent.com/hlclarog/.dotfiles-linux/master/scripts/bootstrap-linux && bash bootstrap-linux
+```
+
+It is a single, standalone, self-contained script -- it never reads any other
+file from this repository, so it works before the repository is even cloned.
+It is interactive (sudo password prompts are expected) and safe to rerun.
+Run it with `--check` to only report what is pending, without changing
+anything.
+
+| Step | What | Why |
+|---|---|---|
+| apt | `apt-get update`/`full-upgrade`, installs the packages from section 2 below plus `openssh-server`, `zram-tools`, `cloud-guest-utils` and `qemu-guest-agent` | same prerequisites as a manual install, plus what the later steps need |
+| disk (server only) | grows the root LV (or partition) to use the whole disk | the Ubuntu Server installer's guided LVM layout leaves most of the volume group unallocated by default |
+| zram (server only) | configures zstd-compressed zram swap, on top of the installer's disk swap file kept as a fallback | a 6 GB RAM VM is tight; RAM-backed compressed swap is far cheaper than the disk swapfile |
+| guest-agent (server only) | enables `qemu-guest-agent` | lets the Mac host (UTM) shut the VM down cleanly and read its IP with `utmctl` |
+| timezone (server only) | sets the system timezone (default `America/Bogota`, override with `--timezone <Zone>`) | the installer defaults to UTC and never asks again |
+| sshd | enables the ssh server | needed for remote access; hardening is left to the dotfiles restore, once `authorized_keys` exists |
+| brew (skip with `--skip-brew`) | installs Homebrew for Linux | same as section 3 below |
+| restore | offers to launch Dotly's restorer directly, or prints the exact command to run it later | still needs the answers from step 4 (SSH keys) below |
+
+WSL only runs the steps it does not skip: disk, zram, guest-agent and
+timezone are server-only and print a one-line skip reason there instead;
+apt, sshd, brew and restore all still run.
+
+Afterwards, continue from step 4 below (SSH keys), then either answer yes to
+bootstrap-linux's own restorer prompt, or run the restorer command it
+printed.
+
 ## 1. Create the WSL instance (Windows PowerShell)
 
 ```powershell
@@ -20,12 +54,17 @@ Pick a username and password when it prompts. Everything after this runs
 
 ## 2. System prerequisites
 
+On a Linux server VM, `bootstrap-linux` above already did this (its `apt` step).
+
 ```bash
 sudo apt update && sudo apt full-upgrade -y
 sudo apt install -y build-essential curl file git zsh unzip python-is-python3
 ```
 
 ## 3. Homebrew for Linux
+
+On a Linux server VM, `bootstrap-linux` above already did this (its `brew`
+step, unless it was run with `--skip-brew`).
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
