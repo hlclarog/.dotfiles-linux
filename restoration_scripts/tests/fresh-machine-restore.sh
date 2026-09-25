@@ -61,8 +61,8 @@ set -u
 DOTFILES_PATH="${DOTFILES_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 export DOTFILES_PATH
 BREWFILE="$DOTFILES_PATH/os/linux/brew/Brewfile"
-SCRIPT_00="$DOTFILES_PATH/restoration_scripts/00-default-shell.sh"
 SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
+SCRIPT_17="$DOTFILES_PATH/restoration_scripts/17-default-shell.sh"
 SCRIPT_08="$DOTFILES_PATH/restoration_scripts/08-pi.sh"
 SCRIPT_09="$DOTFILES_PATH/restoration_scripts/09-gentle-ai-sync.sh"
 SCRIPT_11="$DOTFILES_PATH/restoration_scripts/11-codegraph.sh"
@@ -552,20 +552,25 @@ calls_i=$(grep -vc '^shellenv$' "$BREW_LOG")
 check "missing Brewfile: no tap/trust/bundle call is made" "0" "$calls_i"
 
 # ==============================================================================
-# Bug 5 -- 00-default-shell.sh must fix the invoking user's login shell,
+# Bug 5 -- 17-default-shell.sh must fix the invoking user's login shell,
 # since modules/dotly/scripts/self/install:34 runs `sudo chsh -s "$(command -v
 # zsh)"` with no username and so only ever changes root's shell. It must also
-# undo the side effect: a root shell left pointing at a user-owned Homebrew
-# zsh prefix.
+# undo the side effect: a root shell left pointing at zsh (typically a
+# user-owned Homebrew prefix).
+#
+# This script sorts LAST (17-), after 04-brew-packages.sh installs Homebrew's
+# zsh, so it can prefer a Homebrew zsh from ZSH_CANDIDATES over whatever
+# `command -v zsh` finds first, and it treats the shell as already correct
+# only when it exactly matches that preferred path.
 # ==============================================================================
 echo
-echo "00-default-shell.sh"
+echo "17-default-shell.sh"
 
 SUDO_LOG="$SANDBOX/sudo00.log"
 GETENT_LOG="$SANDBOX/getent00.log"
 export SUDO_LOG GETENT_LOG
 
-mkdir -p "$SANDBOX/stub-00" "$SANDBOX/empty-bin"
+mkdir -p "$SANDBOX/stub-00" "$SANDBOX/empty-bin" "$SANDBOX/stub-00-brew"
 
 cat >"$SANDBOX/stub-00/sudo" <<'STUB'
 #!/usr/bin/env bash
@@ -601,10 +606,17 @@ fi
 STUB
 chmod +x "$SANDBOX/stub-00/tee"
 
+# The fallback zsh found via `command -v zsh` on PATH (e.g. /usr/bin/zsh).
 printf '#!/usr/bin/env bash\nexit 0\n' >"$SANDBOX/stub-00/zsh"
 chmod +x "$SANDBOX/stub-00/zsh"
 
+# A Homebrew zsh listed in ZSH_CANDIDATES, never found via a PATH lookup.
+printf '#!/usr/bin/env bash\nexit 0\n' >"$SANDBOX/stub-00-brew/zsh"
+chmod +x "$SANDBOX/stub-00-brew/zsh"
+
 STUB_ZSH="$SANDBOX/stub-00/zsh"
+BREW_ZSH="$SANDBOX/stub-00-brew/zsh"
+NO_BREW_ZSH="$SANDBOX/empty-bin/zsh"
 WITH_STUB_PATH="$SANDBOX/stub-00:/usr/bin:/bin"
 NO_ZSH_PATH="$SANDBOX/empty-bin"
 
@@ -615,71 +627,106 @@ run00() {
 		SHELLS_FILE="$3"
 		USER_SHELL="$4"
 		ROOT_SHELL="$5"
-		export USER PATH SHELLS_FILE USER_SHELL ROOT_SHELL
-		. "$SCRIPT_00"
+		ZSH_CANDIDATES="$6"
+		export USER PATH SHELLS_FILE USER_SHELL ROOT_SHELL ZSH_CANDIDATES
+		. "$SCRIPT_17"
 	) >"$SANDBOX/out00" 2>&1
 	echo $?
 }
 
-# Case (a): the invoking user is on bash and root's shell is a Homebrew zsh
-# -> chsh the user to the resolved zsh, then reset root to /bin/bash.
+# Case (a): user is on the PATH zsh and a Homebrew zsh candidate exists ->
+# chsh to the Homebrew zsh, not the PATH one.
 SHELLS_FILE_A="$SANDBOX/shells-a"
-printf '/bin/sh\n/bin/bash\n%s\n' "$STUB_ZSH" >"$SHELLS_FILE_A"
+printf '/bin/sh\n/bin/bash\n%s\n%s\n' "$STUB_ZSH" "$BREW_ZSH" >"$SHELLS_FILE_A"
 : >"$SUDO_LOG"
 : >"$GETENT_LOG"
-status_a=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" /bin/bash /home/linuxbrew/.linuxbrew/bin/zsh)
+status_a=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" "$STUB_ZSH" /bin/bash "$BREW_ZSH")
 out_a=$(cat "$SANDBOX/out00")
 check "case a: returns success" "0" "$status_a"
-expected_sudo_a="chsh -s $STUB_ZSH hclaro
-chsh -s /bin/bash root"
-check "case a: chsh for the user then chsh for root, in that order" "$expected_sudo_a" "$(cat "$SUDO_LOG")"
-contains "case a: reports the user's new shell" "Login shell for hclaro set to $STUB_ZSH" "$out_a"
+check "case a: chshes the user to the Homebrew zsh, not the PATH one" "chsh -s $BREW_ZSH hclaro" "$(cat "$SUDO_LOG")"
+contains "case a: reports the user's new shell" "Login shell for hclaro set to $BREW_ZSH" "$out_a"
 
-# Case (b): the invoking user is already on the resolved zsh and root is
-# already bash -> no chsh calls at all.
-SHELLS_FILE_B="$SANDBOX/shells-b"
-printf '/bin/sh\n/bin/bash\n%s\n' "$STUB_ZSH" >"$SHELLS_FILE_B"
+# Case (b): user is already on the Homebrew zsh -> already, no chsh.
 : >"$SUDO_LOG"
 : >"$GETENT_LOG"
-status_b=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_B" "$STUB_ZSH" /bin/bash)
+status_b=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" "$BREW_ZSH" /bin/bash "$BREW_ZSH")
 out_b=$(cat "$SANDBOX/out00")
 check "case b: returns success" "0" "$status_b"
-check "case b: no chsh or tee calls" "" "$(cat "$SUDO_LOG")"
+check "case b: no chsh calls" "" "$(cat "$SUDO_LOG")"
 contains "case b: reports login shell already zsh" "Login shell already zsh" "$out_b"
 
-# Case (c): the resolved zsh is missing from /etc/shells -> it is appended
-# BEFORE chsh runs.
+# Case (c): no Homebrew zsh candidate exists -> falls back to `command -v
+# zsh`, and a user already on that fallback zsh is left alone.
 SHELLS_FILE_C="$SANDBOX/shells-c"
-printf '/bin/sh\n/bin/bash\n' >"$SHELLS_FILE_C"
+printf '/bin/sh\n/bin/bash\n%s\n' "$STUB_ZSH" >"$SHELLS_FILE_C"
 : >"$SUDO_LOG"
 : >"$GETENT_LOG"
-status_c=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_C" /bin/bash /bin/bash)
+status_c=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_C" "$STUB_ZSH" /bin/bash "$NO_BREW_ZSH")
 out_c=$(cat "$SANDBOX/out00")
 check "case c: returns success" "0" "$status_c"
-expected_sudo_c="tee -a $SHELLS_FILE_C
-chsh -s $STUB_ZSH hclaro"
-check "case c: appends to the shells file before chsh" "$expected_sudo_c" "$(cat "$SUDO_LOG")"
-check "case c: the zsh path ends up in the shells file" "$STUB_ZSH" "$(tail -n1 "$SHELLS_FILE_C")"
+check "case c: no chsh calls" "" "$(cat "$SUDO_LOG")"
+contains "case c: reports login shell already zsh" "Login shell already zsh" "$out_c"
 
-# Case (d): no zsh on PATH at all -> skip message, status 0, nothing called.
+# Case (d): the resolved zsh is missing from /etc/shells -> it is appended
+# BEFORE chsh runs.
+SHELLS_FILE_D="$SANDBOX/shells-d"
+printf '/bin/sh\n/bin/bash\n' >"$SHELLS_FILE_D"
 : >"$SUDO_LOG"
 : >"$GETENT_LOG"
-status_d=$(run00 hclaro "$NO_ZSH_PATH" "$SANDBOX/shells-d" /bin/bash /bin/bash)
+status_d=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_D" /bin/bash /bin/bash "$NO_BREW_ZSH")
 out_d=$(cat "$SANDBOX/out00")
-contains "case d: prints a skip message" "zsh is not installed" "$out_d"
 check "case d: returns success" "0" "$status_d"
-check "case d: no sudo calls" "" "$(cat "$SUDO_LOG")"
-check "case d: getent is never called" "" "$(cat "$GETENT_LOG")"
+expected_sudo_d="tee -a $SHELLS_FILE_D
+chsh -s $STUB_ZSH hclaro"
+check "case d: appends to the shells file before chsh" "$expected_sudo_d" "$(cat "$SUDO_LOG")"
+check "case d: the zsh path ends up in the shells file" "$STUB_ZSH" "$(tail -n1 "$SHELLS_FILE_D")"
 
-# Case (e): 00 must sort before 04 and be committed executable.
-ordered_00=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(00|04)-')
-expected_order_00="00-default-shell.sh
-04-brew-packages.sh"
-check "case e: 00 sorts before 04-brew-packages.sh" "$expected_order_00" "$ordered_00"
-[ -x "$SCRIPT_00" ] && script_00_exec=yes || script_00_exec=no
-check "case e: 00-default-shell.sh is executable" "yes" "$script_00_exec"
+# Case (e): no zsh anywhere -> skip message, status 0, nothing called.
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_e=$(run00 hclaro "$NO_ZSH_PATH" "$SANDBOX/shells-e" /bin/bash /bin/bash "$NO_BREW_ZSH")
+out_e=$(cat "$SANDBOX/out00")
+contains "case e: prints a skip message" "zsh is not installed" "$out_e"
+check "case e: returns success" "0" "$status_e"
+check "case e: no sudo calls" "" "$(cat "$SUDO_LOG")"
+check "case e: getent is never called" "" "$(cat "$GETENT_LOG")"
 
-# Case (f)/(g): macOS has no getent, so the login shell must come from dscl.
+# Case (f): root is on a plain zsh, not under any Homebrew prefix -> reset to
+# /bin/bash anyway, since ANY zsh on root is the same Dotly bug.
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_f=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" "$BREW_ZSH" /usr/bin/zsh "$BREW_ZSH")
+out_f=$(cat "$SANDBOX/out00")
+check "case f: returns success" "0" "$status_f"
+check "case f: resets root from a non-Homebrew zsh to /bin/bash" "chsh -s /bin/bash root" "$(cat "$SUDO_LOG")"
+
+# Case (g): root is already /bin/bash -> left untouched.
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_g=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" "$BREW_ZSH" /bin/bash "$BREW_ZSH")
+out_g=$(cat "$SANDBOX/out00")
+check "case g: returns success" "0" "$status_g"
+check "case g: root's bash shell is left untouched" "" "$(cat "$SUDO_LOG")"
+
+# Case (h): root is under a Homebrew prefix -> reset to /bin/bash (existing).
+: >"$SUDO_LOG"
+: >"$GETENT_LOG"
+status_h=$(run00 hclaro "$WITH_STUB_PATH" "$SHELLS_FILE_A" "$BREW_ZSH" /home/linuxbrew/.linuxbrew/bin/zsh "$BREW_ZSH")
+out_h=$(cat "$SANDBOX/out00")
+check "case h: returns success" "0" "$status_h"
+check "case h: resets root from a Homebrew prefix to /bin/bash" "chsh -s /bin/bash root" "$(cat "$SUDO_LOG")"
+
+# Case (i): 17 must sort after 04 and be committed executable; 00 must be gone.
+ordered_17=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|17)-')
+expected_order_17="04-brew-packages.sh
+17-default-shell.sh"
+check "case i: 17 sorts after 04-brew-packages.sh" "$expected_order_17" "$ordered_17"
+[ -x "$SCRIPT_17" ] && script_17_exec=yes || script_17_exec=no
+check "case i: 17-default-shell.sh is executable" "yes" "$script_17_exec"
+[ -e "$DOTFILES_PATH/restoration_scripts/00-default-shell.sh" ] && script_00_present=yes || script_00_present=no
+check "case i: 00-default-shell.sh is absent" "no" "$script_00_present"
+
+# Case (j)/(k): macOS has no getent, so the login shell must come from dscl.
 # Otherwise every `dot self install` on a Mac would prompt for sudo to chsh a
 # user who is already on zsh. Root is never touched on Darwin.
 mkdir -p "$SANDBOX/stub-00-mac"
@@ -693,18 +740,146 @@ MAC_PATH="$SANDBOX/stub-00-mac:$SANDBOX/stub-00:/usr/bin:/bin"
 
 : >"$SUDO_LOG"
 : >"$GETENT_LOG"
-status_f=$(run00 hclaro "$MAC_PATH" "$SHELLS_FILE_B" "$STUB_ZSH" /bin/bash)
-out_f=$(cat "$SANDBOX/out00")
-check "case f: macOS, already zsh: returns success" "0" "$status_f"
-check "case f: macOS, already zsh: no sudo calls" "" "$(cat "$SUDO_LOG")"
-check "case f: macOS: getent is never called" "" "$(cat "$GETENT_LOG")"
-contains "case f: macOS: reports login shell already zsh" "Login shell already zsh" "$out_f"
+status_j=$(run00 hclaro "$MAC_PATH" "$SHELLS_FILE_A" "$BREW_ZSH" /bin/bash "$BREW_ZSH")
+out_j=$(cat "$SANDBOX/out00")
+check "case j: macOS, already zsh: returns success" "0" "$status_j"
+check "case j: macOS, already zsh: no sudo calls" "" "$(cat "$SUDO_LOG")"
+check "case j: macOS: getent is never called" "" "$(cat "$GETENT_LOG")"
+contains "case j: macOS: reports login shell already zsh" "Login shell already zsh" "$out_j"
 
 : >"$SUDO_LOG"
-status_g=$(run00 hclaro "$MAC_PATH" "$SHELLS_FILE_B" /bin/bash /home/linuxbrew/.linuxbrew/bin/zsh)
-check "case g: macOS, user on bash: returns success" "0" "$status_g"
-check "case g: macOS, user on bash: chsh the user only, never root" \
-	"chsh -s $STUB_ZSH hclaro" "$(cat "$SUDO_LOG")"
+status_k=$(run00 hclaro "$MAC_PATH" "$SHELLS_FILE_A" /bin/bash /home/linuxbrew/.linuxbrew/bin/zsh "$BREW_ZSH")
+check "case k: macOS, user on bash: returns success" "0" "$status_k"
+check "case k: macOS, user on bash: chsh the user only, never root" \
+	"chsh -s $BREW_ZSH hclaro" "$(cat "$SUDO_LOG")"
+
+# ==============================================================================
+# Bug 6 -- Dotly's restoration loop (modules/dotly/scripts/self/install:46-52)
+# feeds the list of remaining restoration script names to its `while read`
+# loop on stdin. Any restoration script that reads stdin itself (brew bundle
+# and its cask/formula installers, apt, npm install, etc.) swallows the rest
+# of that list, so every later script is silently skipped -- and the loop's
+# own error handling never fires, because `read` just hits EOF instead of
+# failing. Measured on a fresh Ubuntu VM: during 04-brew-packages.sh, `brew
+# bundle` read stdin and scripts 05..17 never ran; `dot self install` still
+# printed "dotfiles restored". Every restoration_scripts/*.sh must
+# `exec </dev/null` right after its header, before any other command, so it
+# can no longer consume that shared stdin.
+# ==============================================================================
+echo
+echo "exec </dev/null guard"
+
+for _guard_script in "$DOTFILES_PATH"/restoration_scripts/*.sh; do
+	_guard_name=$(basename "$_guard_script")
+	_guard_first_line=$(awk '
+		/^#!/ { next }
+		/^[[:space:]]*#/ { next }
+		/^[[:space:]]*$/ { next }
+		{ print; exit }
+	' "$_guard_script")
+	check "$_guard_name: first real line is exec </dev/null" "exec </dev/null" "$_guard_first_line"
+done
+unset _guard_script _guard_name _guard_first_line
+
+echo
+echo "Dotly restoration loop -- stdin reproduction"
+
+# Reproduces modules/dotly/scripts/self/install:46-52 exactly, with
+# log::file replaced by `cat >/dev/null` and output::error replaced by echo.
+dotly_loop() {
+	find "$1" -mindepth 1 -maxdepth 1 -type l,f -name '*.sh' | sort |
+		while read -r install_script; do
+			{ [[ -x $install_script ]] && . "$install_script" | cat >/dev/null; } || echo "loop error: $install_script"
+		done
+}
+
+LOOP_DIR="$SANDBOX/loop-repro"
+mkdir -p "$LOOP_DIR"
+LOOP_LOG="$SANDBOX/loop.log"
+export LOOP_LOG
+
+cat >"$LOOP_DIR/01-a.sh" <<'EOF'
+#!/usr/bin/env bash
+echo 01 >>"$LOOP_LOG"
+EOF
+cat >"$LOOP_DIR/03-c.sh" <<'EOF'
+#!/usr/bin/env bash
+echo 03 >>"$LOOP_LOG"
+EOF
+chmod +x "$LOOP_DIR/01-a.sh" "$LOOP_DIR/03-c.sh"
+
+# 02-reader.sh WITHOUT the guard -- reads stdin like brew bundle would,
+# swallowing the rest of the script list.
+cat >"$LOOP_DIR/02-reader.sh" <<'EOF'
+#!/usr/bin/env bash
+cat >/dev/null
+echo 02 >>"$LOOP_LOG"
+EOF
+chmod +x "$LOOP_DIR/02-reader.sh"
+
+: >"$LOOP_LOG"
+dotly_loop "$LOOP_DIR"
+log_without_guard=$(cat "$LOOP_LOG")
+contains "without exec </dev/null: 01 runs" "01" "$log_without_guard"
+contains "without exec </dev/null: 02 runs" "02" "$log_without_guard"
+case "$log_without_guard" in
+*03*) reproduces_bug=no ;;
+*) reproduces_bug=yes ;;
+esac
+check "without exec </dev/null: 03 is swallowed (reproduces the bug)" "yes" "$reproduces_bug"
+
+# 02-reader.sh WITH the guard -- exec </dev/null before it reads stdin.
+cat >"$LOOP_DIR/02-reader.sh" <<'EOF'
+#!/usr/bin/env bash
+exec </dev/null
+cat >/dev/null
+echo 02 >>"$LOOP_LOG"
+EOF
+chmod +x "$LOOP_DIR/02-reader.sh"
+
+: >"$LOOP_LOG"
+dotly_loop "$LOOP_DIR"
+log_with_guard=$(cat "$LOOP_LOG")
+contains "with exec </dev/null: 01 runs" "01" "$log_with_guard"
+contains "with exec </dev/null: 02 runs" "02" "$log_with_guard"
+contains "with exec </dev/null: 03 runs (bug fixed)" "03" "$log_with_guard"
+
+echo
+echo "04-brew-packages.sh via the real Dotly loop"
+
+LOOP04_DIR="$SANDBOX/loop-04"
+mkdir -p "$LOOP04_DIR"
+ln -s "$SCRIPT_04" "$LOOP04_DIR/04-brew-packages.sh"
+cat >"$LOOP04_DIR/05-marker.sh" <<'EOF'
+#!/usr/bin/env bash
+echo marker >>"$LOOP_LOG"
+EOF
+chmod +x "$LOOP04_DIR/05-marker.sh"
+
+mkdir -p "$SANDBOX/stub-brew-stdin"
+cat >"$SANDBOX/stub-brew-stdin/brew" <<'STUB'
+#!/usr/bin/env bash
+cat >/dev/null
+echo "$*" >>"$BREW_LOG"
+if [ "$1" = bundle ]; then
+	exit "${BREW_BUNDLE_EXIT:-0}"
+fi
+exit 0
+STUB
+chmod +x "$SANDBOX/stub-brew-stdin/brew"
+
+HOME_LOOP04="$SANDBOX/home-loop04"
+mkdir -p "$HOME_LOOP04"
+: >"$LOOP_LOG"
+: >"$BREW_LOG"
+(
+	HOME="$HOME_LOOP04"
+	PATH="$SANDBOX/stub-brew-stdin:/usr/bin:/bin"
+	export HOME PATH LOOP_LOG BREW_LOG
+	dotly_loop "$LOOP04_DIR"
+) >"$SANDBOX/out-loop04" 2>&1
+log_loop04=$(cat "$LOOP_LOG")
+contains "real 04-brew-packages.sh via the loop: the marker script after it still runs" "marker" "$log_loop04"
 
 # ==============================================================================
 # 08-pi.sh -- installs Pi itself and seeds it to match the reference machine.

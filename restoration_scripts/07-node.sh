@@ -8,6 +8,11 @@
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
 
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
+
 _node_version_file="$DOTFILES_PATH/os/linux/node-version"
 
 if [ ! -f "$_node_version_file" ]; then

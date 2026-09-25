@@ -11,6 +11,11 @@
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
 
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
+
 command -v engram >/dev/null 2>&1 || {
 	echo " > engram is not installed yet; skipping the daemon"
 	return 0

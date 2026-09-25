@@ -11,6 +11,11 @@
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
 
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
+
 grep -qi microsoft /proc/version 2>/dev/null || return 0
 
 wslcfg_template="$DOTFILES_PATH/os/linux/wsl/.wslconfig"
