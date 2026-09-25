@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# One-shot, idempotent host setup for an office iMac hosting a UTM VM that
+# must stay up 24/7. Run by hand, interactively, on the Mac itself (sudo
+# password prompts are expected there):
+#
+#   scripts/setup-mac-vm-host [--vm NAME] [--check]
+#
+# Why each step exists:
+#   - Power (sleep/disksleep/standby/autopoweroff/powernap): any of these
+#     puts the host to sleep, and UTM's VM freezes with it. autorestart+womp
+#     make the Mac come back on its own after a power cut instead of sitting
+#     off until someone walks over to press the button.
+#   - Automatic login: launchd user agents and UTM itself only run inside a
+#     logged-in GUI session, so after a reboot the Mac must reach a desktop
+#     unattended, or nothing below this line ever starts.
+#   - LaunchAgent: launchd is what actually re-runs the watchdog on a
+#     schedule and re-launches it after login; a login script or crontab
+#     entry would not survive a logout/login cycle.
+#   - UTM: the watchdog is useless if the VM does not exist or utmctl cannot
+#     see it, so this just confirms the runtime is actually there.
+#
+# bash 3.2 compatible (macOS's stock /bin/bash): sticks to features available
+# since bash 2/3 and portable coreutils flags only.
+set -u
+
+if [ "$(uname -s)" != "Darwin" ]; then
+	echo "setup-mac-vm-host only runs on macOS (uname -s must be Darwin)." >&2
+	exit 1
+fi
+
+VM_NAME="sandbox-hclaro"
+CHECK_ONLY=0
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--vm)
+		VM_NAME="${2:?--vm requires a name}"
+		shift 2
+		;;
+	--check)
+		CHECK_ONLY=1
+		shift
+		;;
+	*)
+		echo "Unknown argument: $1" >&2
+		exit 2
+		;;
+	esac
+done
+
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-$0}"
+SCRIPT_DIR=$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)
+DOTFILES_PATH=$(cd "$SCRIPT_DIR/.." && pwd)
+WATCHDOG_SCRIPT="$DOTFILES_PATH/os/mac/vm-host/utm-autostart"
+PLIST_TEMPLATE="$DOTFILES_PATH/os/mac/vm-host/dotfiles.utm-autostart.plist.template"
+LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
+LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/dotfiles.utm-autostart.plist"
+UTM_APP_DIR="${UTM_APP_DIR:-/Applications/UTM.app}"
+UTMCTL_BIN="${UTMCTL:-/Applications/UTM.app/Contents/MacOS/utmctl}"
+
+PENDING=0
+
+report() {
+	# report ok|pending "message"
+	if [ "$1" = "ok" ]; then
+		shift
+		printf '\xe2\x9c\x93 %s\n' "$*"
+	else
+		shift
+		PENDING=$((PENDING + 1))
+		printf 'pending: %s\n' "$*"
+	fi
+}
+
+step_power() {
+	echo "-- Power (sleep kills the VM; autorestart/womp survive a power cut) --"
+
+	pmset_current=$(pmset -g 2>/dev/null)
+	keys="sleep disksleep standby autopoweroff powernap autorestart womp"
+	wants="0 0 0 0 0 1 1"
+	need_apply=0
+
+	set -- $wants
+	for key in $keys; do
+		want="$1"
+		shift
+		cur=$(printf '%s\n' "$pmset_current" | awk -v k="$key" '$1==k{print $2; exit}')
+		[ "$cur" = "$want" ] || need_apply=1
+	done
+
+	if [ "$need_apply" -eq 1 ]; then
+		if [ "$CHECK_ONLY" -eq 1 ]; then
+			report pending "power settings (run: sudo pmset -a sleep 0 disksleep 0 standby 0 autopoweroff 0 powernap 0 autorestart 1 womp 1)"
+		else
+			sudo pmset -a sleep 0 disksleep 0 standby 0 autopoweroff 0 powernap 0 autorestart 1 womp 1
+			report ok "power settings applied"
+		fi
+	else
+		report ok "power settings already correct"
+	fi
+
+	restartfreeze=$(systemsetup -getrestartfreeze 2>/dev/null)
+	case "$restartfreeze" in
+	*On*)
+		report ok "restart after freeze already on"
+		;;
+	*)
+		if [ "$CHECK_ONLY" -eq 1 ]; then
+			report pending "restart after freeze (run: sudo systemsetup -setrestartfreeze on)"
+		else
+			sudo systemsetup -setrestartfreeze on
+			report ok "restart after freeze enabled"
+		fi
+		;;
+	esac
+}
+
+step_autologin() {
+	echo "-- Automatic login (launchd and UTM only run inside a logged-in GUI session) --"
+
+	current_user=$(id -un)
+	autologin_user=$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null)
+
+	if [ "$autologin_user" = "$current_user" ]; then
+		report ok "automatic login already set for $current_user"
+		return
+	fi
+
+	filevault_status=$(fdesetup status 2>/dev/null)
+	report pending "automatic login is not set for $current_user (cannot be scripted safely: it stores an obfuscated password)"
+	echo "    Set it by hand: System Preferences > Users & Groups > Login Options > Automatic login > $current_user"
+	echo "    FileVault must be off for automatic login to work. Current status: $filevault_status"
+}
+
+step_launchagent() {
+	echo "-- LaunchAgent (runs the watchdog every 5 minutes and right after login) --"
+
+	tmp_plist=$(mktemp)
+	sed -e "s#@SCRIPT@#$WATCHDOG_SCRIPT#g" \
+		-e "s#@VM_NAME@#$VM_NAME#g" \
+		-e "s#@HOME@#$HOME#g" \
+		"$PLIST_TEMPLATE" >"$tmp_plist"
+
+	up_to_date=0
+	[ -f "$LAUNCH_AGENT_PLIST" ] && cmp -s "$tmp_plist" "$LAUNCH_AGENT_PLIST" && up_to_date=1
+
+	loaded=0
+	launchctl print "gui/$(id -u)/dotfiles.utm-autostart" >/dev/null 2>&1 && loaded=1
+
+	if [ "$up_to_date" -eq 1 ] && [ "$loaded" -eq 1 ]; then
+		report ok "LaunchAgent loaded and current"
+		rm -f "$tmp_plist"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" -eq 1 ]; then
+		report pending "LaunchAgent (render $LAUNCH_AGENT_PLIST, bootstrap dotfiles.utm-autostart)"
+		rm -f "$tmp_plist"
+		return
+	fi
+
+	mkdir -p "$LAUNCH_AGENT_DIR"
+	cp "$tmp_plist" "$LAUNCH_AGENT_PLIST"
+	rm -f "$tmp_plist"
+	launchctl bootout "gui/$(id -u)/dotfiles.utm-autostart" >/dev/null 2>&1
+	launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST"
+
+	if launchctl print "gui/$(id -u)/dotfiles.utm-autostart" >/dev/null 2>&1; then
+		report ok "LaunchAgent rendered and loaded"
+	else
+		report pending "LaunchAgent bootstrap failed; check: launchctl print gui/$(id -u)/dotfiles.utm-autostart"
+	fi
+}
+
+step_utm() {
+	echo "-- UTM (the VM runtime itself; first utmctl call from launchd may prompt for Automation permission -- allow it) --"
+
+	if [ ! -d "$UTM_APP_DIR" ]; then
+		report pending "UTM.app not found at $UTM_APP_DIR"
+		return
+	fi
+
+	if [ ! -x "$UTMCTL_BIN" ]; then
+		report pending "utmctl not found/executable at $UTMCTL_BIN"
+		return
+	fi
+
+	if "$UTMCTL_BIN" list 2>/dev/null | grep -q "$VM_NAME"; then
+		report ok "UTM has a VM named $VM_NAME"
+	else
+		report pending "no VM named $VM_NAME in \`utmctl list\` -- create it in UTM first"
+	fi
+}
+
+step_power
+step_autologin
+step_launchagent
+step_utm
+
+echo
+echo "Test it: sudo reboot, then from another machine wait ~3 min and: ssh $VM_NAME"
+echo "Pause the watchdog on purpose: touch \"$HOME/.utm-autostart-disabled\""
+
+if [ "$CHECK_ONLY" -eq 1 ] && [ "$PENDING" -gt 0 ]; then
+	exit 1
+fi
+exit 0

@@ -1,0 +1,79 @@
+#!/bin/sh
+# Watchdog run by launchd (see dotfiles.utm-autostart.plist.template) that
+# keeps the sandbox-hclaro UTM VM up: UTM does not restart a VM on its own
+# after the host wakes from sleep, reboots or comes back from a power cut, so
+# something has to poll it. POSIX sh only -- launchd calls this through
+# /bin/sh, and it must also survive running under macOS's stock /bin/sh.
+set -u
+
+UTM_VM_NAME="${UTM_VM_NAME:-sandbox-hclaro}"
+UTMCTL="${UTMCTL:-/Applications/UTM.app/Contents/MacOS/utmctl}"
+UTM_START_RETRIES="${UTM_START_RETRIES:-5}"
+UTM_RETRY_SECONDS="${UTM_RETRY_SECONDS:-20}"
+LOG_FILE="$HOME/Library/Logs/utm-autostart.log"
+
+mkdir -p "$HOME/Library/Logs" 2>/dev/null
+
+log_truncate() {
+	[ -f "$LOG_FILE" ] || return 0
+	size=$(wc -c <"$LOG_FILE" 2>/dev/null | tr -d ' ')
+	case "$size" in
+	'' | *[!0-9]*) return 0 ;;
+	esac
+	if [ "$size" -gt 1000000 ]; then
+		tmp="$LOG_FILE.tmp.$$"
+		tail -n 2000 "$LOG_FILE" >"$tmp" && mv "$tmp" "$LOG_FILE"
+	fi
+}
+
+log() {
+	ts=$(date +%Y-%m-%dT%H:%M:%S%z 2>/dev/null)
+	printf '%s %s\n' "$ts" "$1" >>"$LOG_FILE"
+	log_truncate
+}
+
+DISABLE_FLAG="$HOME/.utm-autostart-disabled"
+if [ -e "$DISABLE_FLAG" ]; then
+	log "disabled: $DISABLE_FLAG present, skipping"
+	exit 0
+fi
+
+if [ ! -x "$UTMCTL" ]; then
+	log "ERROR: utmctl not executable: $UTMCTL"
+	exit 0
+fi
+
+status=$("$UTMCTL" status "$UTM_VM_NAME" 2>/dev/null)
+
+case "$status" in
+started | starting | resuming)
+	log "OK: $UTM_VM_NAME is $status"
+	exit 0
+	;;
+paused)
+	log "paused: resuming $UTM_VM_NAME"
+	if "$UTMCTL" resume "$UTM_VM_NAME" >/dev/null 2>&1; then
+		log "resume OK: $UTM_VM_NAME"
+	else
+		log "resume FAILED: $UTM_VM_NAME"
+	fi
+	exit 0
+	;;
+esac
+
+log "not running (status='$status'): starting $UTM_VM_NAME"
+attempt=1
+while [ "$attempt" -le "$UTM_START_RETRIES" ]; do
+	log "start attempt $attempt/$UTM_START_RETRIES"
+	if "$UTMCTL" start "$UTM_VM_NAME" >/dev/null 2>&1; then
+		log "start OK: $UTM_VM_NAME (attempt $attempt)"
+		exit 0
+	fi
+	log "start attempt $attempt failed"
+	if [ "$attempt" -lt "$UTM_START_RETRIES" ]; then
+		sleep "$UTM_RETRY_SECONDS"
+	fi
+	attempt=$((attempt + 1))
+done
+log "start FAILED after $UTM_START_RETRIES attempts: $UTM_VM_NAME"
+exit 0
