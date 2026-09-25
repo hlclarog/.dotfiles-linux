@@ -528,6 +528,62 @@ NOT in the repository — see "Not in the repository, on purpose" below.
 
 ---
 
+## Office iMac: keep the VM up 24/7
+
+An office iMac hosts an Ubuntu VM in UTM (`sandbox-hclaro`) that needs to stay
+reachable after a reboot, a power cut, or the Mac going to sleep. This is a
+separate, one-shot setup that runs by hand on the iMac itself, in an
+interactive terminal (sudo password prompts are expected there).
+
+Clone the dotfiles on the iMac first, then run the setup script:
+
+```bash
+git clone https://github.com/hlclarog/.dotfiles-linux.git ~/.dotfiles
+cd ~/.dotfiles
+./scripts/setup-mac-vm-host           # applies everything it safely can
+./scripts/setup-mac-vm-host --check   # status only, exits 1 if anything is pending
+```
+
+It is idempotent — safe to rerun after any change (a new macOS version, a
+renamed VM via `--vm NAME`, a moved checkout). Each step prints ✓ or
+`pending:`:
+
+1. **Power** — `pmset -a sleep 0 disksleep 0 standby 0 autopoweroff 0
+   powernap 0 autorestart 1 womp 1`. Sleep, disk sleep, standby, auto power
+   off and power nap all suspend the VM with the host; `autorestart` and
+   `womp` bring the Mac back on its own after a power cut instead of sitting
+   off until someone walks over. `displaysleep` is left alone, so the screen
+   can still turn off. `systemsetup -setrestartfreeze on` restarts the Mac if
+   it ever freezes solid instead of hanging forever.
+2. **Automatic login** — cannot be scripted safely (macOS stores an
+   obfuscated copy of the password), so the script only checks and, if
+   missing, prints the manual steps: System Preferences > Users & Groups >
+   Login Options > Automatic login. FileVault must be off for this to work.
+   This matters because the LaunchAgent below, and UTM itself, only run
+   inside a logged-in GUI session — without auto-login, a reboot leaves the
+   VM stopped at the login window.
+3. **LaunchAgent** — renders `os/mac/vm-host/dotfiles.utm-autostart.plist.template`
+   into `~/Library/LaunchAgents/dotfiles.utm-autostart.plist` and loads it
+   with `launchctl bootstrap`. This runs `os/mac/vm-host/utm-autostart`
+   (POSIX sh) every 5 minutes and right after login: if the VM is paused it
+   resumes it, and if it is stopped, crashed, or UTM has not finished
+   launching yet, it retries starting it a few times. It logs to
+   `~/Library/Logs/utm-autostart.log` (kept bounded to the last ~2000 lines).
+4. **UTM** — confirms `/Applications/UTM.app` and `utmctl` exist and that
+   `utmctl list` actually contains the VM name. The first `utmctl` call
+   launchd makes may trigger a macOS Automation permission prompt — watch for
+   it and allow it, or the watchdog silently fails every time after that.
+
+To test: `sudo reboot`, then from another machine wait ~3 minutes and
+`ssh sandbox-hclaro`. To pause the watchdog on purpose (for example, to stop
+the VM by hand without it being restarted 5 minutes later):
+
+```bash
+touch ~/.utm-autostart-disabled
+```
+
+---
+
 ## After the restore: logins and keys
 
 `dot self install` restores everything it safely can unattended, but a
