@@ -448,6 +448,35 @@ device on the same tailnet -- phone, laptop -- needs the Tailscale app installed
 and logged into that same account; once it is, `tailscale ip -4` on this machine
 gives the address to SSH to.
 
+### 9.7 ZeroTier (optional fallback)
+
+Tailscale is the primary remote access path above. [ZeroTier](https://www.zerotier.com)
+is a second, fully independent option -- worth adding only if you want a
+fallback that does not depend on Tailscale's own control plane: no domain to
+buy, no server to run, phone/desktop apps, and network-level access so
+Moshi/mosh work over it too. It is never installed or configured
+automatically; `scripts/post-restore-secrets` only offers it, defaulting to
+**no**, and answering no leaves it completely untouched.
+
+If you do want it, when you create the network at
+[my.zerotier.com](https://my.zerotier.com), set its Managed Route/IP pool to a
+private range that is **not** inside `100.64.0.0/10` -- for example
+`10.147.17.0/24`. That range is what Tailscale reserves for itself on Linux
+and drops on any interface other than `tailscale0`, so a ZeroTier network
+reusing it would silently lose traffic.
+
+Run just this step by hand:
+
+```bash
+POST_RESTORE_ONLY=zerotier scripts/post-restore-secrets
+```
+
+It offers the official installer if `zerotier-cli` is missing, prompts for the
+network ID, joins it, and reminds you to authorize the member in ZeroTier
+Central's Members tab. On the client (laptop/phone), install the ZeroTier app,
+join the same network ID, authorize it, then `ssh <user>@<this machine's
+ZeroTier IP>` -- an untracked `~/.ssh/config.d/` entry works well for that.
+
 ---
 
 ## 10. Code knowledge graph for every agent (CodeGraph)
@@ -612,6 +641,7 @@ Run a single step with `POST_RESTORE_ONLY=<step-id>`, for example
 | `opencode` | opencode login |
 | `engram` | Engram cloud sync credentials (optional, skip with Enter) |
 | `tailscale` | Installs Tailscale and prompts for `tailscale up` (Linux only, skipped on WSL and macOS) |
+| `zerotier` | Optional: offers ZeroTier as an independent fallback (Linux only, skipped on WSL and macOS), defaults to no |
 | `sshd` | Installs the `00-moshi.conf` sshd hardening, skipped with a warning until `~/.ssh/authorized_keys` actually has a key in it |
 | `shell` | Sets the login shell to zsh (`sudo chsh`) |
 | `moshi` | Optional: prints the Moshi pairing commands if `moshi-hook` is installed but not yet paired |
