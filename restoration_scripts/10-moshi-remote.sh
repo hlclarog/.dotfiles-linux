@@ -33,6 +33,11 @@
 # Covered by restoration_scripts/tests/agent-hooks-regression.sh -- run it after
 # touching any of this; the failures it catches are otherwise silent.
 
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
+
 if [ "$(uname -s)" = "Darwin" ]; then
 	echo " > Moshi remote setup is Linux-only here, skipping"
 	return 0

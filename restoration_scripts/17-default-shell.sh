@@ -8,14 +8,42 @@
 # config (starship prompt, atuin, herdr autostart) never loaded on login.
 # Upstream Dotly HEAD still has the same bug.
 #
-# This script (sorting first, 00-) sets the invoking user's login shell
-# instead, and also undoes the side effect line 34 left behind: a root shell
-# pointed at a Homebrew prefix owned by a regular user, which breaks root
-# logins entirely if that Homebrew installation ever breaks.
+# This script sets the invoking user's login shell, and also undoes the side
+# effect line 34 left behind: a root shell pointed at zsh, typically a
+# Homebrew prefix owned by a regular user, which breaks root logins entirely
+# if that Homebrew installation ever breaks.
+#
+# It used to sort first (00-), but that ran BEFORE
+# restoration_scripts/04-brew-packages.sh installs Homebrew's zsh. Measured on
+# a fresh Ubuntu 24.04 VM (reference machine uses Homebrew's zsh): running
+# before 04 meant `command -v zsh` only ever found /usr/bin/zsh, so the login
+# shell was set to the wrong zsh every time, and rerunning never fixed it --
+# the old check treated ANY zsh listed in /etc/shells as already done.
+# Sorting last (17-) only delays the next-login effect by one restore step,
+# which costs nothing, and lets this script prefer a Homebrew zsh over
+# whatever `command -v zsh` happens to find first.
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
 
-zsh_path="$(command -v zsh)"
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
+
+zsh_candidates="${ZSH_CANDIDATES:-/home/linuxbrew/.linuxbrew/bin/zsh /opt/homebrew/bin/zsh /usr/local/bin/zsh}"
+zsh_path=""
+for candidate in $zsh_candidates; do
+	if [ -x "$candidate" ]; then
+		zsh_path="$candidate"
+		break
+	fi
+done
+unset candidate zsh_candidates
+
+if [ -z "$zsh_path" ]; then
+	zsh_path="$(command -v zsh)"
+fi
+
 if [ -z "$zsh_path" ]; then
 	echo " > zsh is not installed, skipping login shell setup"
 	unset zsh_path
@@ -37,21 +65,14 @@ user_name="${USER:-$(id -un)}"
 current_shell=$(login_shell_of "$user_name")
 shells_file="${SHELLS_FILE:-/etc/shells}"
 
-already_zsh=false
 if [ "$current_shell" = "$zsh_path" ]; then
-	already_zsh=true
-elif [[ "$current_shell" == */zsh ]] && grep -Fxq "$current_shell" "$shells_file" 2>/dev/null; then
-	already_zsh=true
-fi
-
-if [ "$already_zsh" = true ]; then
 	echo " > Login shell already zsh"
 else
 	if ! grep -Fxq "$zsh_path" "$shells_file" 2>/dev/null; then
 		if ! echo "$zsh_path" | sudo tee -a "$shells_file" >/dev/null; then
 			echo " > Could not add $zsh_path to $shells_file automatically."
 			echo " > Run manually: echo \"$zsh_path\" | sudo tee -a \"$shells_file\" && sudo chsh -s \"$zsh_path\" \"$user_name\""
-			unset zsh_path user_name current_shell shells_file already_zsh
+			unset zsh_path user_name current_shell shells_file
 			return 0
 		fi
 	fi
@@ -61,26 +82,29 @@ else
 	else
 		echo " > Could not set the login shell automatically."
 		echo " > Run manually: sudo chsh -s \"$zsh_path\" \"$user_name\""
-		unset zsh_path user_name current_shell shells_file already_zsh
+		unset zsh_path user_name current_shell shells_file
 		return 0
 	fi
 fi
 
 if [ "$(uname -s)" != "Darwin" ]; then
 	root_shell=$(login_shell_of root)
+	reset_root=false
 	case "$root_shell" in
-	*/linuxbrew/* | */homebrew/*)
+	*/linuxbrew/* | */homebrew/*) reset_root=true ;;
+	esac
+	[ "${root_shell##*/}" = zsh ] && reset_root=true
+	if [ "$reset_root" = true ]; then
 		if sudo chsh -s /bin/bash root; then
-			echo " > Reset root's login shell from $root_shell to /bin/bash: a root shell under a user-owned Homebrew prefix breaks root logins if that Homebrew installation ever breaks"
+			echo " > Reset root's login shell from $root_shell to /bin/bash: Dotly's own \`sudo chsh -s zsh\` (no username) changes ROOT's shell, and a root shell left on zsh breaks root logins if that zsh (often a user-owned Homebrew prefix) ever becomes unavailable"
 		else
 			echo " > Could not reset root's login shell automatically."
 			echo " > Run manually: sudo chsh -s /bin/bash root"
 		fi
-		;;
-	esac
-	unset root_shell
+	fi
+	unset root_shell reset_root
 fi
 
-unset zsh_path user_name current_shell shells_file already_zsh
+unset zsh_path user_name current_shell shells_file
 unset -f login_shell_of
 return 0

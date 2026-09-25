@@ -17,6 +17,11 @@
 #
 # Sourced by `dot self install`, so it uses return rather than exit.
 
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
+
 _gentle_ai_src="$DOTFILES_PATH/os/linux/gentle-ai/state.json"
 _gentle_ai_dst="$HOME/.gentle-ai/state.json"
 

@@ -20,7 +20,23 @@
 # `trusted:` options. Running `brew trust` for every trusted entry before
 # `brew bundle install` works around it.
 #
+# MEASURED ON A FRESH UBUNTU VM RESTORE: `brew bundle install` reads stdin
+# under the hood, through one of its cask/formula installers, and `dot self
+# install` feeds it the list of restoration scripts still queued on stdin
+# (modules/dotly/scripts/self/install:46-52). That swallowed the rest of the
+# list: scripts 05 through 17 never ran, `brew bundle install` itself
+# stopped partway through with the openai cask and engram missing, and `dot
+# self install` still printed "dotfiles restored" anyway. Rerunning this
+# script by hand with stdin redirected to /dev/null completed correctly in
+# 19 seconds. Earlier restores did not show this because the packages were
+# already installed, so brew bundle never had anything left to read.
+#
 # Sourced by `dot self install`, so it uses return rather than exit.
+
+# Dotly feeds the list of remaining restoration scripts to its loop on stdin;
+# anything here that reads stdin (brew, installers) would swallow that list
+# and silently skip every later script. sudo prompts use /dev/tty, not stdin.
+exec </dev/null
 
 brew_bin=""
 if command -v brew >/dev/null 2>&1; then
