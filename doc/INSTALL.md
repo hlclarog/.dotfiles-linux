@@ -678,7 +678,7 @@ Run a single step with `POST_RESTORE_ONLY=<step-id>`, for example
 | `claude` | Claude Code login, then registers the CodeGraph MCP server if it is still missing |
 | `codex` | Codex device login |
 | `opencode` | opencode login |
-| `engram` | Engram cloud sync credentials (optional, skip with Enter) |
+| `engram-cloud` | Engram cloud sync credentials (optional, skip with Enter) |
 | `tailscale` | Installs Tailscale and prompts for `tailscale up` (Linux only, skipped on WSL and macOS) |
 | `zerotier` | Optional: offers ZeroTier as an independent fallback (Linux only, skipped on WSL and macOS), defaults to no |
 | `sshd` | Installs the `00-moshi.conf` sshd hardening, skipped with a warning until `~/.ssh/authorized_keys` actually has a key in it |
