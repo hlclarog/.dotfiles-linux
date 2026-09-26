@@ -1,10 +1,10 @@
 {
   "gentle-ai-explore": {
-    "model": "openai-codex/gpt-6-luna",
-    "thinking": "high"
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "medium"
   },
   "gentle-ai-verify": {
-    "model": "openai-codex/gpt-6-astra",
+    "model": "openai-codex/gpt-6-sol",
     "thinking": "max"
   },
   "gentle-ai-worker": {
@@ -64,8 +64,8 @@
     "thinking": "max"
   },
   "sdd-explore": {
-    "model": "openai-codex/gpt-6-luna",
-    "thinking": "high"
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "medium"
   },
   "sdd-init": {
     "model": "openai-codex/gpt-6-luna",
@@ -80,8 +80,8 @@
     "thinking": "high"
   },
   "sdd-research": {
-    "model": "openai-codex/gpt-6-luna",
-    "thinking": "high"
+    "model": "openai-codex/gpt-6-sol",
+    "thinking": "medium"
   },
   "sdd-spec": {
     "model": "openai-codex/gpt-6-sol",
@@ -100,7 +100,7 @@
     "thinking": "high"
   },
   "sdd-verify": {
-    "model": "openai-codex/gpt-6-astra",
+    "model": "openai-codex/gpt-6-sol",
     "thinking": "max"
   }
 }

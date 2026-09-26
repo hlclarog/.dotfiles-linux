@@ -287,7 +287,7 @@
       "thinking": "max"
     },
     "sdd-apply": {
-      "model": "claude-bridge/claude-fable-5-1",
+      "model": "claude-bridge/claude-opus-5-5",
       "thinking": "max"
     },
     "review-refuter": {
@@ -374,7 +374,7 @@
     },
     "review-reliability": {
       "model": "claude-bridge/claude-sonnet-5",
-      "thinking": "medium"
+      "thinking": "high"
     },
     "review-resilience": {
       "model": "claude-bridge/claude-sonnet-5",
@@ -382,7 +382,7 @@
     },
     "review-risk": {
       "model": "claude-bridge/claude-sonnet-5",
-      "thinking": "medium"
+      "thinking": "high"
     },
     "sdd-spec": {
       "model": "claude-bridge/claude-opus-5-5",
