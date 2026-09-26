@@ -3,7 +3,7 @@
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 export RESTORE_SCRIPT="$ROOT/scripts/restore-pi-openai-profile"
-export RESTORE_SOURCE="$ROOT/config/pi/open-ai-full.autogen.json"
+export RESTORE_SOURCE_DIR="$ROOT/config/pi"
 python3 - <<'PY'
 import json
 import os
@@ -15,8 +15,9 @@ import tempfile
 import unittest
 
 SCRIPT = Path(os.environ["RESTORE_SCRIPT"])
-SOURCE = Path(os.environ["RESTORE_SOURCE"])
-NAME = "open-ai-full.autogen"
+SOURCE_DIR = Path(os.environ["RESTORE_SOURCE_DIR"])
+NAMES = ("codex-medium", "codex-low")
+NAME = NAMES[0]
 
 
 class RestoreTests(unittest.TestCase):
@@ -27,7 +28,8 @@ class RestoreTests(unittest.TestCase):
         self.home = self.root / "home"
         self.home.mkdir()
         self.target = self.home / ".pi/gentle-ai/profiles.json"
-        self.profile = json.loads(SOURCE.read_text())
+        self.profiles = {name: json.loads((SOURCE_DIR / f"{name}.json").read_text()) for name in NAMES}
+        self.profile = self.profiles[NAME]
 
     def run_restore(self, script=SCRIPT, *args):
         return subprocess.run(
@@ -39,7 +41,7 @@ class RestoreTests(unittest.TestCase):
         )
 
     def assert_safe_output(self, result):
-        for model in (entry["model"] for entry in self.profile.values()):
+        for model in (entry["model"] for profile in self.profiles.values() for entry in profile.values()):
             self.assertNotIn(model, result.stdout + result.stderr)
 
     def registry(self, **kwargs):
@@ -60,7 +62,7 @@ class RestoreTests(unittest.TestCase):
         result = self.run_restore()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.target.read_text()), self.registry(
-            profiles={NAME: self.profile}, active=NAME,
+            profiles=self.profiles, active=NAME,
         ))
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.target.parent.stat().st_mode), 0o700)
@@ -74,7 +76,7 @@ class RestoreTests(unittest.TestCase):
         result = self.run_restore()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.target.read_text()), {
-            **original, "profiles": {**original["profiles"], NAME: self.profile},
+            **original, "profiles": {**original["profiles"], **self.profiles},
         })
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o600)
         backups = self.backups()
@@ -85,7 +87,7 @@ class RestoreTests(unittest.TestCase):
         self.assert_safe_output(result)
 
     def test_identical_profile_is_no_op(self):
-        self.seed(self.registry(profiles={NAME: self.profile}))
+        self.seed(self.registry(profiles=self.profiles))
         before = self.target.read_bytes()
         inode = self.target.stat().st_ino
         result = self.run_restore()
@@ -111,7 +113,7 @@ class RestoreTests(unittest.TestCase):
         result = self.run_restore(SCRIPT, "--replace")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(self.target.read_text()), {
-            **original, "profiles": {**original["profiles"], NAME: self.profile},
+            **original, "profiles": {**original["profiles"], **self.profiles},
         })
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o600)
         backups = self.backups()
@@ -122,12 +124,36 @@ class RestoreTests(unittest.TestCase):
         self.assert_safe_output(result)
 
     def test_replace_identical_profile_is_no_op_without_backup(self):
-        before = self.seed(self.registry(profiles={NAME: self.profile}, active="other"))
+        before = self.seed(self.registry(profiles=self.profiles, active="other"))
         inode = self.target.stat().st_ino
         result = self.run_restore(SCRIPT, "--replace")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual((self.target.read_bytes(), self.target.stat().st_ino), (before, inode))
         self.assertEqual(self.backups(), [])
+
+    def test_partial_registry_adds_only_missing_profile_with_backup(self):
+        original = self.registry(profiles={"other": {"custom": "untouched"}, NAME: self.profile})
+        before = self.seed(original)
+        result = self.run_restore()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.target.read_text()), {
+            **original, "profiles": {**original["profiles"], **self.profiles},
+        })
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), before)
+        self.assert_safe_output(result)
+
+    def test_conflict_in_any_profile_refuses_whole_restore(self):
+        low = NAMES[1]
+        conflicted = {**self.profiles[low], "orchestrator": {"model": "openai-codex/other", "thinking": "high"}}
+        before = self.seed(self.registry(profiles={low: conflicted}))
+        result = self.run_restore()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertNotIn(NAME, json.loads(self.target.read_text())["profiles"])
+        self.assertEqual(self.backups(), [])
+        self.assert_safe_output(result)
 
     def test_malformed_live_refused_without_write(self):
         self.target.parent.mkdir(parents=True)
@@ -179,21 +205,29 @@ class RestoreTests(unittest.TestCase):
         (isolated / "config/pi").mkdir(parents=True)
         script = isolated / "scripts/restore-pi-openai-profile"
         shutil.copyfile(SCRIPT, script)
-        source = isolated / "config/pi/open-ai-full.autogen.json"
-        bad_sources = ["{invalid json", json.dumps({}),
-                       json.dumps({**self.profile, "orchestrator": {"model": "other/model", "thinking": "high"}}),
-                       json.dumps({**self.profile, "orchestrator": {"model": "openai-codex/model", "thinking": "invalid"}}),
-                       json.dumps({**self.profile, "orchestrator": {"model": "openai-codex/model", "thinking": "high", "secret": "not-allowed"}})]
-        for bad in bad_sources:
-            with self.subTest(bad=bad[:30]):
-                source.write_text(bad)
-                for args in ((), ("--replace",)):
-                    with self.subTest(args=args):
-                        result = self.run_restore(script, *args)
-                        self.assertNotEqual(result.returncode, 0)
-                        self.assertEqual(self.target.read_bytes(), before)
-                        self.assertEqual(self.backups(), [])
-                        self.assert_safe_output(result)
+        for name in NAMES:
+            shutil.copyfile(SOURCE_DIR / f"{name}.json", isolated / f"config/pi/{name}.json")
+        for name in NAMES:
+            profile = self.profiles[name]
+            bad_sources = ["{invalid json", json.dumps({}),
+                           json.dumps({**profile, "orchestrator": {"model": "other/model", "thinking": "high"}}),
+                           json.dumps({**profile, "orchestrator": {"model": "openai-codex/model", "thinking": "invalid"}}),
+                           json.dumps({**profile, "orchestrator": {"model": "openai-codex/model", "thinking": "high", "secret": "not-allowed"}})]
+            source = isolated / f"config/pi/{name}.json"
+            valid = source.read_bytes()
+            for bad in bad_sources:
+                with self.subTest(name=name, bad=bad[:30]):
+                    source.write_text(bad)
+                    try:
+                        for args in ((), ("--replace",)):
+                            with self.subTest(args=args):
+                                result = self.run_restore(script, *args)
+                                self.assertNotEqual(result.returncode, 0)
+                                self.assertEqual(self.target.read_bytes(), before)
+                                self.assertEqual(self.backups(), [])
+                                self.assert_safe_output(result)
+                    finally:
+                        source.write_bytes(valid)
 
     def test_fresh_refuses_public_existing_directory(self):
         self.target.parent.mkdir(parents=True)

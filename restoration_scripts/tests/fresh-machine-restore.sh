@@ -1049,23 +1049,26 @@ check "case a: mcp.json has the brew prefix substituted" "/sandbox/brew/bin/engr
 
 profiles_file="$HOME_PI_A/.pi/gentle-ai/profiles.json"
 active=$(jq -r '.active' "$profiles_file")
-check "case a: profiles.json active is claude-full.autogen" "claude-full.autogen" "$active"
+check "case a: profiles.json active is claude-medium" "claude-medium" "$active"
 key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
 check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
 profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
-check "case a: profiles.json has exactly 4 profiles" "4" "$profile_count"
-claude_match=$(jq -S '.profiles | del(."open-ai-full.autogen")' "$profiles_file")
+check "case a: profiles.json has exactly 6 profiles" "6" "$profile_count"
+claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low")' "$profiles_file")
 claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
 check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"
-openai_match=$(jq -S '.profiles["open-ai-full.autogen"]' "$profiles_file")
-openai_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/open-ai-full.autogen.json")
-check "case a: open-ai-full.autogen matches the repo snapshot" "$openai_expected" "$openai_match"
+for _p in codex-medium codex-low; do
+	codex_match=$(jq -S --arg p "$_p" '.profiles[$p]' "$profiles_file")
+	codex_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/$_p.json")
+	check "case a: $_p matches the repo snapshot" "$codex_expected" "$codex_match"
+done
+unset _p codex_match codex_expected
 gentle_ai_dir_perm=$(stat -c '%a' "$HOME_PI_A/.pi/gentle-ai")
 check "case a: ~/.pi/gentle-ai mode is 700" "700" "$gentle_ai_dir_perm"
 
 models_file="$HOME_PI_A/.pi/gentle-ai/models.json"
 models_match=$(jq -S '.' "$models_file")
-active_profile_obj=$(jq -S '.profiles["claude-full.autogen"]' "$profiles_file")
+active_profile_obj=$(jq -S '.profiles["claude-medium"]' "$profiles_file")
 check "case a: models.json equals the active profile" "$active_profile_obj" "$models_match"
 
 install_calls=$(grep '^pi install ' "$PI_LOG")
@@ -1146,7 +1149,7 @@ check "case e: Pi ends up installed via the python3 fallback" "yes" "$pi_install
 setsid_calls_e=$(grep -c '^setsid ' "$PI_LOG")
 check "case e: setsid is never invoked" "0" "$setsid_calls_e"
 
-# Case (f): an existing profiles.json lacking open-ai-full.autogen is left
+# Case (f): an existing profiles.json lacking the codex profiles is left
 # untouched, with a hint to run scripts/restore-pi-openai-profile.
 HOME_PI_F="$SANDBOX/home-pi-f"
 mkdir -p "$HOME_PI_F/.pi/agent/bin" "$HOME_PI_F/.pi/gentle-ai"

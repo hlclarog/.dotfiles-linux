@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manually restore the allowlisted Pi OpenAI profile without changing active selection."""
+"""Manually restore the allowlisted Pi Codex profiles without changing active selection."""
 
 import json
 import math
@@ -9,10 +9,11 @@ import stat
 import sys
 import tempfile
 
-NAME = "open-ai-full.autogen"
+# The first name is the one activated when no registry exists yet.
+NAMES = ("codex-medium", "codex-low")
 KIND = "gentle-pi.agent_model_profiles"
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
-SOURCE = Path(__file__).resolve().parent.parent / "config/pi/open-ai-full.autogen.json"
+SOURCE_DIR = Path(__file__).resolve().parent.parent / "config/pi"
 TARGET = Path.home() / ".pi/gentle-ai/profiles.json"
 
 
@@ -45,9 +46,9 @@ def decode(data):
                       parse_constant=reject_nonfinite, parse_float=finite_float)
 
 
-def validated_source():
+def validated_source(name):
     try:
-        profile = decode(SOURCE.read_bytes())
+        profile = decode((SOURCE_DIR / f"{name}.json").read_bytes())
     except (OSError, ValueError, UnicodeError) as exc:
         raise UnsafeRestore("Source profile is missing or invalid; no registry was changed.") from exc
     if (not isinstance(profile, dict) or len(profile) != 26 or
@@ -103,19 +104,20 @@ def private_file(directory, prefix, data):
 
 
 def restore(replace=False):
-    profile = validated_source()
+    profiles = {name: validated_source(name) for name in NAMES}
     registry, original, info = current_registry()
     if registry is not None:
-        existing = registry["profiles"].get(NAME)
-        if NAME in registry["profiles"]:
-            if existing == profile:
-                print("Profile already present; registry unchanged.")
-                return
-            if not replace:
-                raise UnsafeRestore("Profile key conflicts with the trusted source; inspect it manually. Nothing changed.")
-        registry["profiles"][NAME] = profile
+        # Every conflict is checked before any write, so a refusal changes nothing.
+        pending_names = [name for name in NAMES if registry["profiles"].get(name) != profiles[name]]
+        if not pending_names:
+            print("Profiles already present; registry unchanged.")
+            return
+        if not replace and any(name in registry["profiles"] for name in pending_names):
+            raise UnsafeRestore("Profile key conflicts with the trusted source; inspect it manually. Nothing changed.")
+        for name in pending_names:
+            registry["profiles"][name] = profiles[name]
     else:
-        registry = {"kind": KIND, "version": 1, "profiles": {NAME: profile}, "active": NAME}
+        registry = {"kind": KIND, "version": 1, "profiles": profiles, "active": NAMES[0]}
         TARGET.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if not stat.S_ISDIR(TARGET.parent.stat().st_mode) or TARGET.parent.stat().st_mode & 0o077:
             raise UnsafeRestore("Registry directory is not private; inspect it manually.")
@@ -140,7 +142,7 @@ def restore(replace=False):
     finally:
         if os.path.exists(pending):
             os.unlink(pending)
-    print("Profile restored. Restart Pi to reload its registry; existing active selection was preserved.")
+    print("Profiles restored. Restart Pi to reload its registry; existing active selection was preserved.")
 
 
 def main():
