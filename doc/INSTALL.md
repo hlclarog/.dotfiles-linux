@@ -606,7 +606,8 @@ NOT in the repository — see "Not in the repository, on purpose" below.
 
 ## Office iMac: keep the VM up 24/7
 
-An office iMac hosts an Ubuntu VM in UTM (`sandbox-hclaro`) that needs to stay
+An office iMac hosts an Ubuntu VM in UTM (`sandbox-imac-hclaro-vm`, SSH alias
+`sandbox-imac`) that needs to stay
 reachable after a reboot, a power cut, or the Mac going to sleep. This is a
 separate, one-shot setup that runs by hand on the iMac itself, in an
 interactive terminal (sudo password prompts are expected there).
@@ -650,8 +651,15 @@ renamed VM via `--vm NAME`, a moved checkout). Each step prints ✓ or
    launchd makes may trigger a macOS Automation permission prompt — watch for
    it and allow it, or the watchdog silently fails every time after that.
 
+If `~/Library/LaunchAgents` turns out to be owned by another user (commonly
+`root`, left behind by an adware installer or similar), the LaunchAgent step
+reports it as `pending` instead of touching it: forcing a `chown` there could
+paper over unwanted software still running elsewhere. Inspect
+`/Library/LaunchDaemons` and anything else installed around the same time
+before running the `sudo chown` command the script prints.
+
 To test: `sudo reboot`, then from another machine wait ~3 minutes and
-`ssh sandbox-hclaro`. To pause the watchdog on purpose (for example, to stop
+`ssh sandbox-imac`. To pause the watchdog on purpose (for example, to stop
 the VM by hand without it being restarted 5 minutes later):
 
 ```bash

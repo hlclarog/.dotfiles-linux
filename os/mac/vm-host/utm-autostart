@@ -1,12 +1,12 @@
 #!/bin/sh
 # Watchdog run by launchd (see dotfiles.utm-autostart.plist.template) that
-# keeps the sandbox-hclaro UTM VM up: UTM does not restart a VM on its own
+# keeps the sandbox-imac-hclaro-vm UTM VM up: UTM does not restart a VM on its own
 # after the host wakes from sleep, reboots or comes back from a power cut, so
 # something has to poll it. POSIX sh only -- launchd calls this through
 # /bin/sh, and it must also survive running under macOS's stock /bin/sh.
 set -u
 
-UTM_VM_NAME="${UTM_VM_NAME:-sandbox-hclaro}"
+UTM_VM_NAME="${UTM_VM_NAME:-sandbox-imac-hclaro-vm}"
 UTMCTL="${UTMCTL:-/Applications/UTM.app/Contents/MacOS/utmctl}"
 UTM_START_RETRIES="${UTM_START_RETRIES:-5}"
 UTM_RETRY_SECONDS="${UTM_RETRY_SECONDS:-20}"

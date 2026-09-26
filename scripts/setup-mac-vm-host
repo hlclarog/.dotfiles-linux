@@ -28,7 +28,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 	exit 1
 fi
 
-VM_NAME="sandbox-hclaro"
+VM_NAME="sandbox-imac-hclaro-vm"
 CHECK_ONLY=0
 
 while [ $# -gt 0 ]; do
@@ -135,6 +135,16 @@ step_autologin() {
 step_launchagent() {
 	echo "-- LaunchAgent (runs the watchdog every 5 minutes and right after login) --"
 
+	current_user=$(id -un)
+	if [ -d "$LAUNCH_AGENT_DIR" ]; then
+		owner=$(stat -f %Su "$LAUNCH_AGENT_DIR" 2>/dev/null)
+		if [ -n "$owner" ] && [ "$owner" != "$current_user" ]; then
+			# shellcheck disable=SC2088 # literal "~/..." in the message, not a path to expand
+			report pending "~/Library/LaunchAgents is owned by $owner, not $current_user. Something installed with root left it that way; inspect what else it installed (e.g. unexpected items in /Library/LaunchDaemons) before fixing it with: sudo chown $current_user:staff ~/Library/LaunchAgents"
+			return
+		fi
+	fi
+
 	tmp_plist=$(mktemp)
 	sed -e "s#@SCRIPT@#$WATCHDOG_SCRIPT#g" \
 		-e "s#@VM_NAME@#$VM_NAME#g" \
@@ -160,8 +170,13 @@ step_launchagent() {
 	fi
 
 	mkdir -p "$LAUNCH_AGENT_DIR"
-	cp "$tmp_plist" "$LAUNCH_AGENT_PLIST"
+	cp_error=$(cp "$tmp_plist" "$LAUNCH_AGENT_PLIST" 2>&1)
+	cp_status=$?
 	rm -f "$tmp_plist"
+	if [ "$cp_status" -ne 0 ]; then
+		report pending "LaunchAgent copy failed ($cp_error); check permissions on $LAUNCH_AGENT_DIR"
+		return
+	fi
 	launchctl bootout "gui/$(id -u)/dotfiles.utm-autostart" >/dev/null 2>&1
 	launchctl bootstrap "gui/$(id -u)" "$LAUNCH_AGENT_PLIST"
 
@@ -198,7 +213,7 @@ step_launchagent
 step_utm
 
 echo
-echo "Test it: sudo reboot, then from another machine wait ~3 min and: ssh $VM_NAME"
+echo "Test it: sudo reboot, then from another machine wait ~3 min and SSH into the VM (e.g. ssh sandbox-imac)."
 echo "Pause the watchdog on purpose: touch \"$HOME/.utm-autostart-disabled\""
 
 if [ "$CHECK_ONLY" -eq 1 ] && [ "$PENDING" -gt 0 ]; then
