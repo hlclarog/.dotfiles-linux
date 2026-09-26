@@ -184,7 +184,7 @@ if [ ! -f "$pi_profiles" ]; then
 	chmod 600 "$pi_profiles"
 elif ! jq -e '.profiles["codex-medium"] and .profiles["codex-low"]' "$pi_profiles" >/dev/null 2>&1; then
 	echo " > ~/.pi/gentle-ai/profiles.json lacks codex-medium or codex-low; run"
-	echo "   scripts/restore-pi-openai-profile to add them"
+	echo "   scripts/restore-pi-codex-profiles to add them"
 fi
 
 pi_models="$HOME/.pi/gentle-ai/models.json"

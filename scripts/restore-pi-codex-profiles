@@ -50,7 +50,7 @@ def validated_source(name):
     try:
         profile = decode((SOURCE_DIR / f"{name}.json").read_bytes())
     except (OSError, ValueError, UnicodeError) as exc:
-        raise UnsafeRestore("Source profile is missing or invalid; no registry was changed.") from exc
+        raise UnsafeRestore(f"Source profile {name} is missing or invalid; no registry was changed.") from exc
     if (not isinstance(profile, dict) or len(profile) != 26 or
             any(not isinstance(role, str) or not isinstance(entry, dict) or
                 set(entry) != {"model", "thinking"} or
@@ -59,7 +59,7 @@ def validated_source(name):
                 type(entry["thinking"]) is not str or
                 entry["thinking"] not in THINKING
                 for role, entry in profile.items())):
-        raise UnsafeRestore("Source profile is invalid; no registry was changed.")
+        raise UnsafeRestore(f"Source profile {name} is invalid; no registry was changed.")
     return profile
 
 
@@ -112,8 +112,10 @@ def restore(replace=False):
         if not pending_names:
             print("Profiles already present; registry unchanged.")
             return
-        if not replace and any(name in registry["profiles"] for name in pending_names):
-            raise UnsafeRestore("Profile key conflicts with the trusted source; inspect it manually. Nothing changed.")
+        conflicts = [name for name in pending_names if name in registry["profiles"]]
+        if not replace and conflicts:
+            raise UnsafeRestore(f"Profile {', '.join(conflicts)} conflicts with the trusted source; "
+                                "inspect it manually. Nothing changed.")
         for name in pending_names:
             registry["profiles"][name] = profiles[name]
     else:
@@ -147,7 +149,7 @@ def restore(replace=False):
 
 def main():
     if sys.argv[1:] not in ([], ["--replace"]):
-        print("Usage: restore-pi-openai-profile [--replace]", file=sys.stderr)
+        print("Usage: restore-pi-codex-profiles [--replace]", file=sys.stderr)
         return 2
     try:
         restore(replace=sys.argv[1:] == ["--replace"])
