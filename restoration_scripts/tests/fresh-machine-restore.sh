@@ -1355,10 +1355,12 @@ for _case in f2 f3; do
 	fi
 	printf '{"kind":"gentle-pi.agent_model_profiles","version":1,"profiles":%s,"active":"codex-medium"}\n' \
 		"$_profiles" >"$_home/.pi/gentle-ai/profiles.json"
+	_before=$(cat "$_home/.pi/gentle-ai/profiles.json")
 	: >"$PI_LOG"
 	_status=$(run08pi "$_home" "$BASE_PI_PATH")
 	_out=$(cat "$SANDBOX/out08pi")
 	check "case $_case: returns success" "0" "$_status"
+	check "case $_case: the existing profiles.json is left untouched" "$_before" "$(cat "$_home/.pi/gentle-ai/profiles.json")"
 	case "$_out" in
 	*"lacks codex-medium or codex-low"*) _hint=yes ;;
 	*) _hint=no ;;
@@ -1369,7 +1371,7 @@ for _case in f2 f3; do
 		check "case f3: both codex profiles present prints no hint" "no" "$_hint"
 	fi
 done
-unset _case _home _profiles _status _out _hint
+unset _case _home _profiles _before _status _out _hint
 
 # Case (g): the first install-sdd attempt fails -> no second attempt is made,
 # the existing failure message style is kept, status is still 0.
