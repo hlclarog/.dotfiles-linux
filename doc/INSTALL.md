@@ -130,6 +130,14 @@ Script 04 runs `brew bundle install --no-upgrade`, so rerunning `self install`
 on a machine that is already set up installs only what is missing and never
 upgrades anything behind your back.
 
+Claude Code itself comes from Anthropic's own installer
+(`04-claude-code.sh`, sorting right after script 04), not the Homebrew
+cask: the cask lagged behind the minimum version Pi's claude-bridge needs,
+and `claude update` refuses to run on a brew install, while the native
+`~/.local/bin/claude` install auto-updates on every launch and `claude
+update` works normally. If it finds the Homebrew cask still installed once
+the native binary works, it removes it.
+
 The apt list in `os/linux/apt/packages.txt` is **not** covered by script 04:
 only `dot package import` installs it, with `sudo`. Run it after `self
 install` — or, with Dotly's `restorer`, answer **Y** to "import previous
