@@ -1673,7 +1673,17 @@ TSSTUB
 	chmod +x "$TS_BIN_DIR/tailscale"
 }
 
-STUB16_PATH="$SANDBOX/tsbin16:$SANDBOX/stub16:/usr/bin:/bin"
+# The system tools, minus any real tailscale: with Tailscale installed on the
+# machine running this suite, /usr/bin/tailscale leaked into the "not
+# installed" cases and they all reported "Tailscale is up".
+mkdir -p "$SANDBOX/sysbin16"
+for sys_tool in /usr/bin/* /bin/*; do
+	case "$(basename "$sys_tool")" in tailscale | tailscaled) continue ;; esac
+	[ -e "$SANDBOX/sysbin16/$(basename "$sys_tool")" ] || [ -L "$SANDBOX/sysbin16/$(basename "$sys_tool")" ] ||
+		ln -s "$sys_tool" "$SANDBOX/sysbin16/$(basename "$sys_tool")"
+done
+unset sys_tool
+STUB16_PATH="$SANDBOX/tsbin16:$SANDBOX/stub16:$SANDBOX/sysbin16"
 
 printf 'Linux version 6.8.0-49-generic (buildd@lcy02) #49-Ubuntu\n' > "$SANDBOX/proc-version-linux16"
 printf 'Linux version 5.15.153.1-microsoft-standard-WSL2\n' > "$SANDBOX/proc-version-wsl16"
@@ -1847,6 +1857,28 @@ for _old_name in 06-claude-statusline.sh 07-gentle-ai-state.sh 08-node.sh \
 	check "$_old_name no longer exists" "no" "$old_present"
 done
 unset _old_name old_present
+
+# --- shell/zsh/.zshenv: Homebrew on PATH for non-interactive sessions ---------
+# mosh and the Moshi app start mosh-server through `ssh host mosh-server ...`,
+# a non-interactive zsh that reads only .zshenv. Measured on the VM: with brew's
+# bin missing there, `command -v mosh-server` failed over SSH.
+if command -v zsh >/dev/null 2>&1; then
+	ZSHENV="$DOTFILES_PATH/shell/zsh/.zshenv"
+	fake_brew="$SANDBOX/zshenv-brew/bin"
+	mkdir -p "$fake_brew"
+	printf '#!/bin/sh\n' >"$fake_brew/mosh-server"
+	chmod +x "$fake_brew/mosh-server"
+	zshenv_found=$(env -i HOME="$SANDBOX" PATH=/usr/bin:/bin ZSHENV_BREW_BINS="$fake_brew" \
+		zsh -fc ". \"$ZSHENV\"; command -v mosh-server" 2>/dev/null)
+	check ".zshenv puts Homebrew's bin on PATH for non-interactive zsh" "$fake_brew/mosh-server" "$zshenv_found"
+	zshenv_path=$(env -i HOME="$SANDBOX" PATH="$fake_brew:/usr/bin:/bin" ZSHENV_BREW_BINS="$fake_brew" \
+		zsh -fc ". \"$ZSHENV\"; . \"$ZSHENV\"; print -r -- \$PATH" 2>/dev/null)
+	check ".zshenv does not duplicate a PATH entry" "$fake_brew:/usr/bin:/bin" "$zshenv_path"
+	zshenv_missing=$(env -i HOME="$SANDBOX" PATH=/usr/bin:/bin ZSHENV_BREW_BINS="$SANDBOX/no-such-brew/bin" \
+		zsh -fc ". \"$ZSHENV\"; print -r -- \$PATH" 2>/dev/null)
+	check ".zshenv skips a Homebrew prefix that does not exist" "/usr/bin:/bin" "$zshenv_missing"
+	unset ZSHENV fake_brew zshenv_found zshenv_path zshenv_missing
+fi
 
 echo
 if [ "$tests_failed" -eq 0 ]; then
