@@ -1323,7 +1323,7 @@ setsid_calls_e=$(grep -c '^setsid ' "$PI_LOG")
 check "case e: setsid is never invoked" "0" "$setsid_calls_e"
 
 # Case (f): an existing profiles.json lacking the codex profiles is left
-# untouched, with a hint to run scripts/restore-pi-openai-profile.
+# untouched, with a hint to run scripts/restore-pi-codex-profiles.
 HOME_PI_F="$SANDBOX/home-pi-f"
 mkdir -p "$HOME_PI_F/.pi/agent/bin" "$HOME_PI_F/.pi/gentle-ai"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_PI_F/.pi/agent/bin/pi"
@@ -1338,7 +1338,38 @@ out_pi_f=$(cat "$SANDBOX/out08pi")
 check "case f: returns success" "0" "$status_pi_f"
 profiles_after_f=$(cat "$HOME_PI_F/.pi/gentle-ai/profiles.json")
 check "case f: the existing profiles.json is left untouched" "$profiles_before_f" "$profiles_after_f"
-contains "case f: hint mentions scripts/restore-pi-openai-profile" "scripts/restore-pi-openai-profile" "$out_pi_f"
+contains "case f: hint names the missing codex profiles" "lacks codex-medium or codex-low" "$out_pi_f"
+contains "case f: hint mentions scripts/restore-pi-codex-profiles" "scripts/restore-pi-codex-profiles" "$out_pi_f"
+
+# Case (f2): a registry holding only one codex profile still gets the hint.
+# Case (f3): a registry holding both codex profiles gets no hint.
+for _case in f2 f3; do
+	_home="$SANDBOX/home-pi-$_case"
+	mkdir -p "$_home/.pi/agent/bin" "$_home/.pi/gentle-ai"
+	printf '#!/usr/bin/env bash\nexit 0\n' >"$_home/.pi/agent/bin/pi"
+	chmod +x "$_home/.pi/agent/bin/pi"
+	if [ "$_case" = f2 ]; then
+		_profiles='{"codex-medium":{}}'
+	else
+		_profiles='{"codex-medium":{},"codex-low":{}}'
+	fi
+	printf '{"kind":"gentle-pi.agent_model_profiles","version":1,"profiles":%s,"active":"codex-medium"}\n' \
+		"$_profiles" >"$_home/.pi/gentle-ai/profiles.json"
+	: >"$PI_LOG"
+	_status=$(run08pi "$_home" "$BASE_PI_PATH")
+	_out=$(cat "$SANDBOX/out08pi")
+	check "case $_case: returns success" "0" "$_status"
+	case "$_out" in
+	*"lacks codex-medium or codex-low"*) _hint=yes ;;
+	*) _hint=no ;;
+	esac
+	if [ "$_case" = f2 ]; then
+		check "case f2: one codex profile present still prints the hint" "yes" "$_hint"
+	else
+		check "case f3: both codex profiles present prints no hint" "no" "$_hint"
+	fi
+done
+unset _case _home _profiles _status _out _hint
 
 # Case (g): the first install-sdd attempt fails -> no second attempt is made,
 # the existing failure message style is kept, status is still 0.

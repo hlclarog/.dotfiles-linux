@@ -2,7 +2,7 @@
 # Run the manual Pi profile restore contract entirely in disposable HOME directories.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-export RESTORE_SCRIPT="$ROOT/scripts/restore-pi-openai-profile"
+export RESTORE_SCRIPT="$ROOT/scripts/restore-pi-codex-profiles"
 export RESTORE_SOURCE_DIR="$ROOT/config/pi"
 python3 - <<'PY'
 import json
@@ -101,6 +101,7 @@ class RestoreTests(unittest.TestCase):
         result = self.run_restore()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("inspect", (result.stdout + result.stderr).lower())
+        self.assertIn(f"Profile {NAME} conflicts", result.stderr)
         self.assertEqual(self.target.read_bytes(), before)
         self.assertEqual(self.backups(), [])
         self.assert_safe_output(result)
@@ -150,8 +151,22 @@ class RestoreTests(unittest.TestCase):
         before = self.seed(self.registry(profiles={low: conflicted}))
         result = self.run_restore()
         self.assertNotEqual(result.returncode, 0)
+        # Only the conflicting profile is named, not the one that is merely missing.
+        self.assertIn(f"Profile {low} conflicts", result.stderr)
+        self.assertNotIn(NAME, result.stderr)
         self.assertEqual(self.target.read_bytes(), before)
         self.assertNotIn(NAME, json.loads(self.target.read_text())["profiles"])
+        self.assertEqual(self.backups(), [])
+        self.assert_safe_output(result)
+
+    def test_conflict_in_both_profiles_names_both(self):
+        conflicted = {name: {**profile, "orchestrator": {"model": "openai-codex/other", "thinking": "high"}}
+                      for name, profile in self.profiles.items()}
+        before = self.seed(self.registry(profiles=conflicted))
+        result = self.run_restore()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"Profiles {', '.join(NAMES)} conflict with the trusted source", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
         self.assertEqual(self.backups(), [])
         self.assert_safe_output(result)
 
@@ -203,7 +218,7 @@ class RestoreTests(unittest.TestCase):
         isolated = self.root / "bundle"
         (isolated / "scripts").mkdir(parents=True)
         (isolated / "config/pi").mkdir(parents=True)
-        script = isolated / "scripts/restore-pi-openai-profile"
+        script = isolated / "scripts/restore-pi-codex-profiles"
         shutil.copyfile(SCRIPT, script)
         for name in NAMES:
             shutil.copyfile(SOURCE_DIR / f"{name}.json", isolated / f"config/pi/{name}.json")
@@ -223,6 +238,7 @@ class RestoreTests(unittest.TestCase):
                             with self.subTest(args=args):
                                 result = self.run_restore(script, *args)
                                 self.assertNotEqual(result.returncode, 0)
+                                self.assertIn(f"Source profile {name} ", result.stderr)
                                 self.assertEqual(self.target.read_bytes(), before)
                                 self.assertEqual(self.backups(), [])
                                 self.assert_safe_output(result)

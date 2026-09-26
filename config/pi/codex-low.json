@@ -77,7 +77,7 @@
   },
   "sdd-proposal": {
     "model": "openai-codex/gpt-6-luna",
-    "thinking": "high"
+    "thinking": "medium"
   },
   "sdd-research": {
     "model": "openai-codex/gpt-6-luna",
@@ -97,7 +97,7 @@
   },
   "sdd-tasks": {
     "model": "openai-codex/gpt-6-luna",
-    "thinking": "high"
+    "thinking": "medium"
   },
   "sdd-verify": {
     "model": "openai-codex/gpt-6-sol",
