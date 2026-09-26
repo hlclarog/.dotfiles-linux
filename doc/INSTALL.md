@@ -202,9 +202,9 @@ from Homebrew instead -- it is rewritten to whatever `claude` resolves to on
 PATH, or dropped entirely (falling back to the SDK's own lookup) when no
 `claude` is found. This repair also runs against a `claude-bridge.json` left
 over from an earlier restore, not just a freshly seeded one. Script 08 then
-builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles
-(`current`, `claude-full`, `claude-medium`, `claude-low`, `codex-medium`,
-`codex-low`) with `claude-medium` active, installs every package pinned in the seeded
+builds `~/.pi/gentle-ai/profiles.json` with all eight saved profiles
+(`current`, `claude-full`, `claude-high`, `claude-medium`, `claude-low`,
+`codex-high`, `codex-medium`, `codex-low`) with `claude-medium` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
 is installed explicitly instead -- and finally runs `pi -p
@@ -238,45 +238,60 @@ hand:
 fnm exec --using=default gentle-ai sync
 ```
 
-### Restore the Pi Codex model profiles (manual recovery for an existing registry)
+### The `high` profiles: spending down a subscription window
+
+`claude-high` and `codex-high` run every role at maximum effort (`"thinking":
+"max"` on every one of the 26 roles). They exist only for the last stretch of
+a subscription window, to spend whatever quota is left before it resets --
+not for everyday use, since they are the most expensive profiles available.
+Switch to one from inside Pi with `/gentle:profiles`, and switch back to a
+medium profile (`claude-medium` or `codex-medium`) once the window resets or
+the work is done. Neither profile is ever activated automatically; restoring
+or rebuilding the registry always leaves `claude-medium` active.
+
+### Restore the Pi model profiles (manual recovery for an existing registry)
 
 A fresh machine already has these: script 08 builds
-`~/.pi/gentle-ai/profiles.json` with all six saved profiles (`current`,
-`claude-full`, `claude-medium`, `claude-low`, `codex-medium`, `codex-low`) and
-activates `claude-medium` the first time it installs Pi, so nothing else needs
-to run for a new machine.
+`~/.pi/gentle-ai/profiles.json` with all eight saved profiles (`current`,
+`claude-full`, `claude-high`, `claude-medium`, `claude-low`, `codex-high`,
+`codex-medium`, `codex-low`) and activates `claude-medium` the first time it
+installs Pi, so nothing else needs to run for a new machine.
 
 This script instead exists for an **existing** registry that predates that
-restore, or one where `codex-medium` or `codex-low` is missing or was
-overwritten. Run it from the dotfiles checkout:
+restore, or one where `codex-medium`, `codex-low`, `codex-high` or
+`claude-high` is missing or was overwritten. Run it from the dotfiles
+checkout:
 
 ```bash
 cd "$HOME/.dotfiles"
-./scripts/restore-pi-codex-profiles
+./scripts/restore-pi-profiles
 ```
 
 This command is not part of `dot self install` or `gentle-ai`. On an existing
 registry it adds only the missing profiles, **never changes the active
-selection**, and returns without writing when both profiles already match. By
-default, it refuses to overwrite a different same-name profile and names the
-conflicting profile; a conflict in either profile refuses the whole restore, so
-nothing is half-applied. Malformed or symlinked registries are always refused.
-If a Codex profile was overwritten, **close Pi first** and review the existing
-`~/.pi/gentle-ai/profiles.json` before choosing explicit recovery:
+selection**, and returns without writing when all four profiles already
+match. By default, it refuses to overwrite a different same-name profile and
+names the conflicting profile; a conflict in any profile refuses the whole
+restore, so nothing is half-applied. Malformed or symlinked registries are
+always refused. If one of these profiles was overwritten, **close Pi first**
+and review the existing `~/.pi/gentle-ai/profiles.json` before choosing
+explicit recovery:
 
 ```bash
 cd "$HOME/.dotfiles"
-./scripts/restore-pi-codex-profiles --replace
+./scripts/restore-pi-profiles --replace
 ```
 
-This replaces only `codex-medium` and `codex-low` from the trusted repository
-sources (`config/pi/codex-medium.json` and `config/pi/codex-low.json`), without
-changing other profiles or the active selection. Before changing an existing
-registry, the script saves its **exact original bytes** in a private (mode
-`600`) `profiles.json.backup-*` file alongside it. Review the restored profiles
-and retain the backup until you have checked the result; the backup may contain
-private registry data. If both profiles already match, `--replace` does nothing
-and creates no backup. Restart Pi after restoring to reload its registry.
+This replaces only `codex-medium`, `codex-low`, `codex-high` and
+`claude-high` from the trusted repository sources (`config/pi/codex-medium.json`,
+`config/pi/codex-low.json`, `config/pi/codex-high.json` and the `claude-high`
+key of `config/pi/claude-profiles.json`), without changing other profiles or
+the active selection. Before changing an existing registry, the script saves
+its **exact original bytes** in a private (mode `600`) `profiles.json.backup-*`
+file alongside it. Review the restored profiles and retain the backup until
+you have checked the result; the backup may contain private registry data. If
+all four profiles already match, `--replace` does nothing and creates no
+backup. Restart Pi after restoring to reload its registry.
 
 The repository saves model names and thinking levels only. Pi authentication
 (`~/.pi/agent/auth.json`) stays private and is **not** restored by this command;
@@ -284,8 +299,9 @@ model availability still depends on valid provider authentication and Pi's
 model catalog.
 
 For Claude profile recovery, `config/pi/claude-profiles.json` saves only the
-model and thinking mappings for `current`, `claude-full`, `claude-medium` and
-`claude-low`. Close Pi before running `./scripts/upgrade-pi-claude-opus`
+model and thinking mappings for `current`, `claude-full`, `claude-high`,
+`claude-medium` and `claude-low`. Close Pi before running
+`./scripts/upgrade-pi-claude-opus`
 on an existing registry: it updates exact old Opus references without changing
 the active profile and saves a private backup when it makes changes. The
 migration cannot create a fresh Pi registry; the snapshot is for manual

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Manually restore the allowlisted Pi Codex profiles without changing active selection."""
+"""Manually restore the allowlisted Pi agent-model profiles without changing active selection."""
 
 import json
 import math
@@ -10,10 +10,18 @@ import sys
 import tempfile
 
 # The first name is the one activated when no registry exists yet.
-NAMES = ("codex-medium", "codex-low")
+NAMES = ("codex-medium", "codex-low", "codex-high", "claude-high")
 KIND = "gentle-pi.agent_model_profiles"
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 SOURCE_DIR = Path(__file__).resolve().parent.parent / "config/pi"
+# Each entry is (source file, required model prefix, key inside that file --
+# None means the whole decoded file is the profile).
+SOURCES = {
+    "codex-medium": (SOURCE_DIR / "codex-medium.json", "openai-codex/", None),
+    "codex-low": (SOURCE_DIR / "codex-low.json", "openai-codex/", None),
+    "codex-high": (SOURCE_DIR / "codex-high.json", "openai-codex/", None),
+    "claude-high": (SOURCE_DIR / "claude-profiles.json", "claude-bridge/", "claude-high"),
+}
 TARGET = Path.home() / ".pi/gentle-ai/profiles.json"
 
 
@@ -47,15 +55,17 @@ def decode(data):
 
 
 def validated_source(name):
+    path, prefix, key = SOURCES[name]
     try:
-        profile = decode((SOURCE_DIR / f"{name}.json").read_bytes())
-    except (OSError, ValueError, UnicodeError) as exc:
+        data = decode(path.read_bytes())
+        profile = data if key is None else data[key]
+    except (OSError, ValueError, UnicodeError, KeyError, TypeError) as exc:
         raise UnsafeRestore(f"Source profile {name} is missing or invalid; no registry was changed.") from exc
     if (not isinstance(profile, dict) or len(profile) != 26 or
             any(not isinstance(role, str) or not isinstance(entry, dict) or
                 set(entry) != {"model", "thinking"} or
                 type(entry["model"]) is not str or
-                not entry["model"].startswith("openai-codex/") or
+                not entry["model"].startswith(prefix) or
                 type(entry["thinking"]) is not str or
                 entry["thinking"] not in THINKING
                 for role, entry in profile.items())):
@@ -151,7 +161,7 @@ def restore(replace=False):
 
 def main():
     if sys.argv[1:] not in ([], ["--replace"]):
-        print("Usage: restore-pi-codex-profiles [--replace]", file=sys.stderr)
+        print("Usage: restore-pi-profiles [--replace]", file=sys.stderr)
         return 2
     try:
         restore(replace=sys.argv[1:] == ["--replace"])
