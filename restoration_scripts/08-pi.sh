@@ -169,21 +169,22 @@ fi
 # --- 5. profile registry -------------------------------------------------------
 # Mirrors the reference machine's active selection; switch profiles from
 # inside Pi with /gentle:profiles.
-pi_active_profile="claude-full.autogen"
+pi_active_profile="claude-medium"
 
 pi_profiles="$HOME/.pi/gentle-ai/profiles.json"
 if [ ! -f "$pi_profiles" ]; then
 	jq -n \
 		--slurpfile pi_claude "$DOTFILES_PATH/config/pi/claude-profiles.json" \
-		--slurpfile pi_openai "$DOTFILES_PATH/config/pi/open-ai-full.autogen.json" \
+		--slurpfile pi_codex_medium "$DOTFILES_PATH/config/pi/codex-medium.json" \
+		--slurpfile pi_codex_low "$DOTFILES_PATH/config/pi/codex-low.json" \
 		--arg pi_active "$pi_active_profile" \
 		'{kind: "gentle-pi.agent_model_profiles", version: 1,
-		  profiles: ($pi_claude[0] + {"open-ai-full.autogen": $pi_openai[0]}),
+		  profiles: ($pi_claude[0] + {"codex-medium": $pi_codex_medium[0], "codex-low": $pi_codex_low[0]}),
 		  active: $pi_active}' >"$pi_profiles"
 	chmod 600 "$pi_profiles"
-elif ! jq -e '.profiles["open-ai-full.autogen"]' "$pi_profiles" >/dev/null 2>&1; then
-	echo " > ~/.pi/gentle-ai/profiles.json lacks open-ai-full.autogen; run"
-	echo "   scripts/restore-pi-openai-profile to add it"
+elif ! jq -e '.profiles["codex-medium"] and .profiles["codex-low"]' "$pi_profiles" >/dev/null 2>&1; then
+	echo " > ~/.pi/gentle-ai/profiles.json lacks codex-medium or codex-low; run"
+	echo "   scripts/restore-pi-openai-profile to add them"
 fi
 
 pi_models="$HOME/.pi/gentle-ai/models.json"

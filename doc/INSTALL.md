@@ -193,9 +193,9 @@ from Homebrew instead -- it is rewritten to whatever `claude` resolves to on
 PATH, or dropped entirely (falling back to the SDK's own lookup) when no
 `claude` is found. This repair also runs against a `claude-bridge.json` left
 over from an earlier restore, not just a freshly seeded one. Script 08 then
-builds `~/.pi/gentle-ai/profiles.json` with all four saved profiles
-(`current`, `claude-full`, `claude-full.autogen`, `open-ai-full.autogen`) with
-`claude-full.autogen` active, installs every package pinned in the seeded
+builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles
+(`current`, `claude-full`, `claude-medium`, `claude-low`, `codex-medium`,
+`codex-low`) with `claude-medium` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
 is installed explicitly instead -- and finally runs `pi -p

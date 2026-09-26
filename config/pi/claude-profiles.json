@@ -209,7 +209,7 @@
       "thinking": "max"
     }
   },
-  "claude-full.autogen": {
+  "claude-medium": {
     "orchestrator": {
       "model": "claude-bridge/claude-opus-5-5",
       "thinking": "high"
@@ -313,6 +313,112 @@
     "jd-judge-a": {
       "model": "claude-bridge/claude-opus-5-5",
       "thinking": "max"
+    }
+  },
+  "claude-low": {
+    "orchestrator": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
+    },
+    "sdd-init": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "thinking": "low"
+    },
+    "sdd-onboard": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "thinking": "low"
+    },
+    "sdd-status": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "thinking": "low"
+    },
+    "sdd-sync": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "thinking": "low"
+    },
+    "sdd-archive": {
+      "model": "claude-bridge/claude-haiku-4-5",
+      "thinking": "low"
+    },
+    "sdd-explore": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "sdd-research": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "gentle-ai-explore": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "sdd-proposal": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "sdd-tasks": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "gentle-ai-worker": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "high"
+    },
+    "jd-fix-agent": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "high"
+    },
+    "review-readability": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "review-reliability": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "review-resilience": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "review-risk": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "medium"
+    },
+    "sdd-spec": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
+    },
+    "sdd-design": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
+    },
+    "sdd-apply": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "high"
+    },
+    "review-refuter": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "high"
+    },
+    "jd-judge-b": {
+      "model": "claude-bridge/claude-sonnet-5",
+      "thinking": "high"
+    },
+    "sdd-verify": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
+    },
+    "gentle-ai-verify": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
+    },
+    "review-validator": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
+    },
+    "jd-judge-a": {
+      "model": "claude-bridge/claude-opus-5-5",
+      "thinking": "high"
     }
   }
 }
