@@ -2,7 +2,7 @@
 # Run the manual Pi profile restore contract entirely in disposable HOME directories.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-export RESTORE_SCRIPT="$ROOT/scripts/restore-pi-codex-profiles"
+export RESTORE_SCRIPT="$ROOT/scripts/restore-pi-profiles"
 export RESTORE_SOURCE_DIR="$ROOT/config/pi"
 python3 - <<'PY'
 import json
@@ -16,8 +16,42 @@ import unittest
 
 SCRIPT = Path(os.environ["RESTORE_SCRIPT"])
 SOURCE_DIR = Path(os.environ["RESTORE_SOURCE_DIR"])
-NAMES = ("codex-medium", "codex-low")
+NAMES = ("codex-medium", "codex-low", "codex-high", "claude-high")
 NAME = NAMES[0]
+# Each entry is (source file, prefix required of every model, key inside that
+# file -- None means the whole decoded file is the profile).
+SOURCE_FILES = {
+    "codex-medium": "codex-medium.json",
+    "codex-low": "codex-low.json",
+    "codex-high": "codex-high.json",
+    "claude-high": "claude-profiles.json",
+}
+SOURCE_KEYS = {"claude-high": "claude-high"}
+PREFIXES = {
+    "codex-medium": "openai-codex/",
+    "codex-low": "openai-codex/",
+    "codex-high": "openai-codex/",
+    "claude-high": "claude-bridge/",
+}
+CANONICAL_ORDER = [
+    "orchestrator", "sdd-init", "sdd-onboard", "sdd-explore", "sdd-research",
+    "sdd-proposal", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-status",
+    "sdd-apply", "sdd-verify", "sdd-sync", "sdd-archive", "jd-judge-a",
+    "jd-judge-b", "jd-fix-agent", "gentle-ai-explore", "gentle-ai-verify",
+    "gentle-ai-worker", "review-readability", "review-reliability",
+    "review-resilience", "review-risk", "review-refuter", "review-validator",
+]
+
+
+def wrap(name, profile):
+    key = SOURCE_KEYS.get(name)
+    return {key: profile} if key else profile
+
+
+def load_profile(source_dir, name):
+    data = json.loads((source_dir / SOURCE_FILES[name]).read_text())
+    key = SOURCE_KEYS.get(name)
+    return data[key] if key else data
 
 
 class RestoreTests(unittest.TestCase):
@@ -28,7 +62,7 @@ class RestoreTests(unittest.TestCase):
         self.home = self.root / "home"
         self.home.mkdir()
         self.target = self.home / ".pi/gentle-ai/profiles.json"
-        self.profiles = {name: json.loads((SOURCE_DIR / f"{name}.json").read_text()) for name in NAMES}
+        self.profiles = {name: load_profile(SOURCE_DIR, name) for name in NAMES}
         self.profile = self.profiles[NAME]
 
     def run_restore(self, script=SCRIPT, *args):
@@ -96,7 +130,7 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.backups(), [])
 
     def test_conflict_refused_without_write_or_backup(self):
-        conflicted = {**self.profile, "orchestrator": {"model": "openai-codex/other", "thinking": "high"}}
+        conflicted = {**self.profile, "orchestrator": {"model": PREFIXES[NAME] + "other", "thinking": "high"}}
         before = self.seed(self.registry(profiles={NAME: conflicted}))
         result = self.run_restore()
         self.assertNotEqual(result.returncode, 0)
@@ -145,13 +179,35 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(backups[0].read_bytes(), before)
         self.assert_safe_output(result)
 
+    def test_high_profiles_added_to_existing_medium_low_registry(self):
+        # An existing registry that already has codex-medium/codex-low but
+        # lacks both high profiles gets exactly those two added; active is
+        # preserved and a backup of the exact original bytes is written.
+        original = self.registry(
+            profiles={"codex-medium": self.profiles["codex-medium"],
+                      "codex-low": self.profiles["codex-low"]},
+            active="codex-medium",
+        )
+        before = self.seed(original)
+        result = self.run_restore()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(self.target.read_text()), {
+            **original, "profiles": {**original["profiles"],
+                                     "codex-high": self.profiles["codex-high"],
+                                     "claude-high": self.profiles["claude-high"]},
+        })
+        backups = self.backups()
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), before)
+        self.assert_safe_output(result)
+
     def test_conflict_in_any_profile_refuses_whole_restore(self):
         low = NAMES[1]
-        conflicted = {**self.profiles[low], "orchestrator": {"model": "openai-codex/other", "thinking": "high"}}
+        conflicted = {**self.profiles[low], "orchestrator": {"model": PREFIXES[low] + "other", "thinking": "high"}}
         before = self.seed(self.registry(profiles={low: conflicted}))
         result = self.run_restore()
         self.assertNotEqual(result.returncode, 0)
-        # Only the conflicting profile is named, not the one that is merely missing.
+        # Only the conflicting profile is named, not one that is merely missing.
         self.assertIn(f"Profile {low} conflicts", result.stderr)
         self.assertNotIn(NAME, result.stderr)
         self.assertEqual(self.target.read_bytes(), before)
@@ -159,8 +215,8 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.backups(), [])
         self.assert_safe_output(result)
 
-    def test_conflict_in_both_profiles_names_both(self):
-        conflicted = {name: {**profile, "orchestrator": {"model": "openai-codex/other", "thinking": "high"}}
+    def test_conflict_in_all_profiles_names_all(self):
+        conflicted = {name: {**profile, "orchestrator": {"model": PREFIXES[name] + "other", "thinking": "high"}}
                       for name, profile in self.profiles.items()}
         before = self.seed(self.registry(profiles=conflicted))
         result = self.run_restore()
@@ -218,17 +274,19 @@ class RestoreTests(unittest.TestCase):
         isolated = self.root / "bundle"
         (isolated / "scripts").mkdir(parents=True)
         (isolated / "config/pi").mkdir(parents=True)
-        script = isolated / "scripts/restore-pi-codex-profiles"
+        script = isolated / "scripts/restore-pi-profiles"
         shutil.copyfile(SCRIPT, script)
-        for name in NAMES:
-            shutil.copyfile(SOURCE_DIR / f"{name}.json", isolated / f"config/pi/{name}.json")
+        for filename in set(SOURCE_FILES.values()):
+            shutil.copyfile(SOURCE_DIR / filename, isolated / f"config/pi/{filename}")
         for name in NAMES:
             profile = self.profiles[name]
-            bad_sources = ["{invalid json", json.dumps({}),
-                           json.dumps({**profile, "orchestrator": {"model": "other/model", "thinking": "high"}}),
-                           json.dumps({**profile, "orchestrator": {"model": "openai-codex/model", "thinking": "invalid"}}),
-                           json.dumps({**profile, "orchestrator": {"model": "openai-codex/model", "thinking": "high", "secret": "not-allowed"}})]
-            source = isolated / f"config/pi/{name}.json"
+            prefix = PREFIXES[name]
+            bad_sources = ["{invalid json",
+                           json.dumps(wrap(name, {})),
+                           json.dumps(wrap(name, {**profile, "orchestrator": {"model": "other/model", "thinking": "high"}})),
+                           json.dumps(wrap(name, {**profile, "orchestrator": {"model": prefix + "model", "thinking": "invalid"}})),
+                           json.dumps(wrap(name, {**profile, "orchestrator": {"model": prefix + "model", "thinking": "high", "secret": "not-allowed"}}))]
+            source = isolated / f"config/pi/{SOURCE_FILES[name]}"
             valid = source.read_bytes()
             for bad in bad_sources:
                 with self.subTest(name=name, bad=bad[:30]):
@@ -244,6 +302,69 @@ class RestoreTests(unittest.TestCase):
                                 self.assert_safe_output(result)
                     finally:
                         source.write_bytes(valid)
+
+    def test_claude_high_source_wrong_prefix_refused_nothing_changed(self):
+        before = self.seed(self.registry())
+        isolated = self.root / "bundle-claude-high"
+        (isolated / "scripts").mkdir(parents=True)
+        (isolated / "config/pi").mkdir(parents=True)
+        script = isolated / "scripts/restore-pi-profiles"
+        shutil.copyfile(SCRIPT, script)
+        for filename in set(SOURCE_FILES.values()):
+            shutil.copyfile(SOURCE_DIR / filename, isolated / f"config/pi/{filename}")
+        source = isolated / "config/pi/claude-profiles.json"
+        data = json.loads(source.read_text())
+        data["claude-high"] = {**data["claude-high"],
+                                "orchestrator": {"model": "openai-codex/gpt-6-sol", "thinking": "max"}}
+        source.write_text(json.dumps(data))
+        result = self.run_restore(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Source profile claude-high ", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.backups(), [])
+        self.assert_safe_output(result)
+
+    def test_codex_high_source_wrong_prefix_refused_nothing_changed(self):
+        before = self.seed(self.registry())
+        isolated = self.root / "bundle-codex-high"
+        (isolated / "scripts").mkdir(parents=True)
+        (isolated / "config/pi").mkdir(parents=True)
+        script = isolated / "scripts/restore-pi-profiles"
+        shutil.copyfile(SCRIPT, script)
+        for filename in set(SOURCE_FILES.values()):
+            shutil.copyfile(SOURCE_DIR / filename, isolated / f"config/pi/{filename}")
+        source = isolated / "config/pi/codex-high.json"
+        data = json.loads(source.read_text())
+        data["orchestrator"] = {"model": "claude-bridge/claude-opus-5-5", "thinking": "max"}
+        source.write_text(json.dumps(data))
+        result = self.run_restore(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Source profile codex-high ", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.backups(), [])
+        self.assert_safe_output(result)
+
+    def test_high_profiles_exact_contents_and_canonical_order(self):
+        fable = "claude-bridge/claude-fable-5-1"
+        opus = "claude-bridge/claude-opus-5-5"
+        fable_roles = {"sdd-proposal", "sdd-design", "jd-judge-b", "jd-fix-agent"}
+        expected_claude_high = {
+            role: {"model": fable if role in fable_roles else opus, "thinking": "max"}
+            for role in CANONICAL_ORDER
+        }
+        self.assertEqual(list(self.profiles["claude-high"].keys()), CANONICAL_ORDER)
+        self.assertEqual(self.profiles["claude-high"], expected_claude_high)
+
+        astra = "openai-codex/gpt-6-astra"
+        sol = "openai-codex/gpt-6-sol"
+        astra_roles = {"sdd-proposal", "sdd-spec", "sdd-design", "sdd-apply", "sdd-verify",
+                       "jd-judge-a", "jd-judge-b", "review-refuter", "review-validator", "gentle-ai-verify"}
+        expected_codex_high = {
+            role: {"model": astra if role in astra_roles else sol, "thinking": "max"}
+            for role in CANONICAL_ORDER
+        }
+        self.assertEqual(list(self.profiles["codex-high"].keys()), CANONICAL_ORDER)
+        self.assertEqual(self.profiles["codex-high"], expected_codex_high)
 
     def test_fresh_refuses_public_existing_directory(self):
         self.target.parent.mkdir(parents=True)

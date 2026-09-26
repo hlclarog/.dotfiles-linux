@@ -177,14 +177,15 @@ if [ ! -f "$pi_profiles" ]; then
 		--slurpfile pi_claude "$DOTFILES_PATH/config/pi/claude-profiles.json" \
 		--slurpfile pi_codex_medium "$DOTFILES_PATH/config/pi/codex-medium.json" \
 		--slurpfile pi_codex_low "$DOTFILES_PATH/config/pi/codex-low.json" \
+		--slurpfile pi_codex_high "$DOTFILES_PATH/config/pi/codex-high.json" \
 		--arg pi_active "$pi_active_profile" \
 		'{kind: "gentle-pi.agent_model_profiles", version: 1,
-		  profiles: ($pi_claude[0] + {"codex-medium": $pi_codex_medium[0], "codex-low": $pi_codex_low[0]}),
+		  profiles: ($pi_claude[0] + {"codex-medium": $pi_codex_medium[0], "codex-low": $pi_codex_low[0], "codex-high": $pi_codex_high[0]}),
 		  active: $pi_active}' >"$pi_profiles"
 	chmod 600 "$pi_profiles"
-elif ! jq -e '.profiles["codex-medium"] and .profiles["codex-low"]' "$pi_profiles" >/dev/null 2>&1; then
-	echo " > ~/.pi/gentle-ai/profiles.json lacks codex-medium or codex-low; run"
-	echo "   scripts/restore-pi-codex-profiles to add them"
+elif ! jq -e '.profiles["codex-medium"] and .profiles["codex-low"] and .profiles["codex-high"] and .profiles["claude-high"]' "$pi_profiles" >/dev/null 2>&1; then
+	echo " > ~/.pi/gentle-ai/profiles.json lacks codex-medium, codex-low, codex-high or claude-high; run"
+	echo "   scripts/restore-pi-profiles to add them"
 fi
 
 pi_models="$HOME/.pi/gentle-ai/models.json"

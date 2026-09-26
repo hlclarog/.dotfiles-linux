@@ -1226,11 +1226,11 @@ check "case a: profiles.json active is claude-medium" "claude-medium" "$active"
 key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
 check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
 profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
-check "case a: profiles.json has exactly 6 profiles" "6" "$profile_count"
-claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low")' "$profiles_file")
+check "case a: profiles.json has exactly 8 profiles" "8" "$profile_count"
+claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low", ."codex-high")' "$profiles_file")
 claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
 check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"
-for _p in codex-medium codex-low; do
+for _p in codex-medium codex-low codex-high; do
 	codex_match=$(jq -S --arg p "$_p" '.profiles[$p]' "$profiles_file")
 	codex_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/$_p.json")
 	check "case a: $_p matches the repo snapshot" "$codex_expected" "$codex_match"
@@ -1322,8 +1322,8 @@ check "case e: Pi ends up installed via the python3 fallback" "yes" "$pi_install
 setsid_calls_e=$(grep -c '^setsid ' "$PI_LOG")
 check "case e: setsid is never invoked" "0" "$setsid_calls_e"
 
-# Case (f): an existing profiles.json lacking the codex profiles is left
-# untouched, with a hint to run scripts/restore-pi-codex-profiles.
+# Case (f): an existing profiles.json lacking the high/codex profiles is left
+# untouched, with a hint to run scripts/restore-pi-profiles.
 HOME_PI_F="$SANDBOX/home-pi-f"
 mkdir -p "$HOME_PI_F/.pi/agent/bin" "$HOME_PI_F/.pi/gentle-ai"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$HOME_PI_F/.pi/agent/bin/pi"
@@ -1338,20 +1338,20 @@ out_pi_f=$(cat "$SANDBOX/out08pi")
 check "case f: returns success" "0" "$status_pi_f"
 profiles_after_f=$(cat "$HOME_PI_F/.pi/gentle-ai/profiles.json")
 check "case f: the existing profiles.json is left untouched" "$profiles_before_f" "$profiles_after_f"
-contains "case f: hint names the missing codex profiles" "lacks codex-medium or codex-low" "$out_pi_f"
-contains "case f: hint mentions scripts/restore-pi-codex-profiles" "scripts/restore-pi-codex-profiles" "$out_pi_f"
+contains "case f: hint names the missing profiles" "lacks codex-medium, codex-low, codex-high or claude-high" "$out_pi_f"
+contains "case f: hint mentions scripts/restore-pi-profiles" "scripts/restore-pi-profiles" "$out_pi_f"
 
-# Case (f2): a registry holding only one codex profile still gets the hint.
-# Case (f3): a registry holding both codex profiles gets no hint.
+# Case (f2): a registry holding only some of the four profiles still gets the hint.
+# Case (f3): a registry holding all four profiles gets no hint.
 for _case in f2 f3; do
 	_home="$SANDBOX/home-pi-$_case"
 	mkdir -p "$_home/.pi/agent/bin" "$_home/.pi/gentle-ai"
 	printf '#!/usr/bin/env bash\nexit 0\n' >"$_home/.pi/agent/bin/pi"
 	chmod +x "$_home/.pi/agent/bin/pi"
 	if [ "$_case" = f2 ]; then
-		_profiles='{"codex-medium":{}}'
+		_profiles='{"codex-medium":{},"codex-low":{},"codex-high":{}}'
 	else
-		_profiles='{"codex-medium":{},"codex-low":{}}'
+		_profiles='{"codex-medium":{},"codex-low":{},"codex-high":{},"claude-high":{}}'
 	fi
 	printf '{"kind":"gentle-pi.agent_model_profiles","version":1,"profiles":%s,"active":"codex-medium"}\n' \
 		"$_profiles" >"$_home/.pi/gentle-ai/profiles.json"
@@ -1362,13 +1362,13 @@ for _case in f2 f3; do
 	check "case $_case: returns success" "0" "$_status"
 	check "case $_case: the existing profiles.json is left untouched" "$_before" "$(cat "$_home/.pi/gentle-ai/profiles.json")"
 	case "$_out" in
-	*"lacks codex-medium or codex-low"*) _hint=yes ;;
+	*"lacks codex-medium, codex-low, codex-high or claude-high"*) _hint=yes ;;
 	*) _hint=no ;;
 	esac
 	if [ "$_case" = f2 ]; then
-		check "case f2: one codex profile present still prints the hint" "yes" "$_hint"
+		check "case f2: some profiles present still prints the hint" "yes" "$_hint"
 	else
-		check "case f3: both codex profiles present prints no hint" "no" "$_hint"
+		check "case f3: all four profiles present prints no hint" "no" "$_hint"
 	fi
 done
 unset _case _home _profiles _before _status _out _hint
