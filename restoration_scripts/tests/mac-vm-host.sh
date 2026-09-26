@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Regression tests for the office iMac VM-host setup: keeping the UTM VM that
-# hosts sandbox-hclaro up 24/7 across sleep, reboot and power cuts.
+# hosts sandbox-imac-hclaro-vm up 24/7 across sleep, reboot and power cuts.
 #
 # Nothing here touches a real Mac. Every mutating/network command
 # (sudo, pmset, systemsetup, launchctl, defaults, fdesetup, utmctl, uname) is
@@ -110,6 +110,16 @@ exit 0
 STUB
 chmod +x "$STUBBIN/fdesetup"
 
+cat >"$STUBBIN/stat" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "-f" ] && [ "$2" = "%Su" ]; then
+	echo "${STAT_OWNER:-$(id -un)}"
+	exit 0
+fi
+exit 1
+STUB
+chmod +x "$STUBBIN/stat"
+
 cat >"$STUBBIN/launchctl" <<'STUB'
 #!/usr/bin/env bash
 echo "launchctl $*" >>"$LAUNCHCTL_LOG"
@@ -146,7 +156,7 @@ resume)
 	exit "${UTMCTL_RESUME_EXIT:-0}"
 	;;
 list)
-	echo "${UTMCTL_LIST_OUTPUT-sandbox-hclaro}"
+	echo "${UTMCTL_LIST_OUTPUT-sandbox-imac-hclaro-vm}"
 	;;
 esac
 exit 0
@@ -217,7 +227,7 @@ for SHELL_BIN in bash sh; do
 	rm -rf "$HOME_D"; mkdir -p "$HOME_D"
 	touch "$HOME_D/.utm-autostart-disabled"
 	UTMCTL_LOG="$SANDBOX/utmctl-disabled-$SHELL_BIN.log"; : >"$UTMCTL_LOG"
-	export UTMCTL_LOG UTM_VM_NAME=sandbox-hclaro UTM_START_RETRIES=3 UTM_RETRY_SECONDS=0
+	export UTMCTL_LOG UTM_VM_NAME=sandbox-imac-hclaro-vm UTM_START_RETRIES=3 UTM_RETRY_SECONDS=0
 	status=$(run_watchdog "$SHELL_BIN" "$HOME_D")
 	check "$SHELL_BIN: disabled flag -> exit 0" "0" "$status"
 	utmctl_calls=$(wc -l <"$UTMCTL_LOG" | tr -d ' ')
@@ -234,7 +244,7 @@ for SHELL_BIN in bash sh; do
 		HOME="$HOME_M"
 		PATH="$STUB_PATH"
 		UTMCTL="$MISSING_UTMCTL"
-		export HOME PATH UTMCTL UTMCTL_LOG UTM_VM_NAME=sandbox-hclaro
+		export HOME PATH UTMCTL UTMCTL_LOG UTM_VM_NAME=sandbox-imac-hclaro-vm
 		"$SHELL_BIN" "$WATCHDOG" >"$SANDBOX/wd-out" 2>&1
 		echo $?
 	)
@@ -284,6 +294,17 @@ for SHELL_BIN in bash sh; do
 	start_calls=$(grep -c '^utmctl start ' "$UTMCTL_LOG" || true)
 	check "$SHELL_BIN: start always fails -> exactly UTM_START_RETRIES attempts" "3" "$start_calls"
 	unset UTMCTL_START_EXIT UTM_START_RETRIES UTM_RETRY_SECONDS UTMCTL_RESUME_EXIT UTMCTL_STATUS UTMCTL_STATUS_EXIT
+
+	# no UTM_VM_NAME given -> watchdog defaults to sandbox-imac-hclaro-vm
+	HOME_DEFAULT="$SANDBOX/wd-default-$SHELL_BIN"
+	rm -rf "$HOME_DEFAULT"; mkdir -p "$HOME_DEFAULT"
+	UTMCTL_LOG="$SANDBOX/utmctl-default-$SHELL_BIN.log"; : >"$UTMCTL_LOG"
+	unset UTM_VM_NAME
+	export UTMCTL_STATUS=started UTMCTL_STATUS_EXIT=0
+	status=$(run_watchdog "$SHELL_BIN" "$HOME_DEFAULT")
+	check "$SHELL_BIN: no UTM_VM_NAME -> exit 0" "0" "$status"
+	contains "$SHELL_BIN: watchdog default VM name is sandbox-imac-hclaro-vm" "utmctl status sandbox-imac-hclaro-vm" "$(cat "$UTMCTL_LOG")"
+	unset UTMCTL_STATUS UTMCTL_STATUS_EXIT
 done
 
 # log truncation keeps it bounded
@@ -349,7 +370,7 @@ run_setup() {
 		export HOME PATH UTM_APP_DIR UTMCTL \
 			SUDO_LOG PMSET_LOG PMSET_G_OUTPUT SYSTEMSETUP_LOG SYSTEMSETUP_RESTARTFREEZE \
 			DEFAULTS_LOG DEFAULTS_AUTOLOGIN_USER FDESETUP_LOG FDESETUP_STATUS \
-			LAUNCHCTL_LOG UTMCTL_LOG UTMCTL_LIST_OUTPUT UNAME_S
+			LAUNCHCTL_LOG UTMCTL_LOG UTMCTL_LIST_OUTPUT UNAME_S STAT_OWNER
 		bash "$SETUP" "$@"
 	) >"$SANDBOX/setup-out" 2>&1
 	echo $?
@@ -371,7 +392,7 @@ export DEFAULTS_AUTOLOGIN_USER="$CURRENT_USER"
 export FDESETUP_STATUS="FileVault is Off."
 export SYSTEMSETUP_RESTARTFREEZE=On
 export PMSET_G_OUTPUT="$GOOD_PMSET"
-export UTMCTL_LIST_OUTPUT="sandbox-hclaro"
+export UTMCTL_LIST_OUTPUT="sandbox-imac-hclaro-vm"
 
 # first apply run: renders + bootstraps the LaunchAgent from scratch
 SUDO_LOG="$SANDBOX/sudo-1.log"; : >"$SUDO_LOG"
@@ -381,7 +402,7 @@ DEFAULTS_LOG="$SANDBOX/defaults-1.log"; : >"$DEFAULTS_LOG"
 FDESETUP_LOG="$SANDBOX/fdesetup-1.log"; : >"$FDESETUP_LOG"
 LAUNCHCTL_LOG="$SANDBOX/launchctl-1.log"; : >"$LAUNCHCTL_LOG"
 UTMCTL_LOG="$SANDBOX/utmctl-1.log"; : >"$UTMCTL_LOG"
-status=$(run_setup "$SETUP_HOME" --vm sandbox-hclaro)
+status=$(run_setup "$SETUP_HOME" --vm sandbox-imac-hclaro-vm)
 check "apply (golden path) -> exit 0" "0" "$status"
 bootstrap_calls=$(grep -c '^launchctl bootstrap ' "$LAUNCHCTL_LOG" || true)
 check "first apply -> bootstrap called once" "1" "$bootstrap_calls"
@@ -396,7 +417,7 @@ not_contains "LaunchAgent has no @SCRIPT@ placeholder left" "@SCRIPT@" "$plist_c
 not_contains "LaunchAgent has no @VM_NAME@ placeholder left" "@VM_NAME@" "$plist_content"
 not_contains "LaunchAgent has no @HOME@ placeholder left" "@HOME@" "$plist_content"
 contains "LaunchAgent has the correct absolute script path" "$DOTFILES_PATH/os/mac/vm-host/utm-autostart" "$plist_content"
-contains "LaunchAgent has the VM name from --vm" "sandbox-hclaro" "$plist_content"
+contains "LaunchAgent has the VM name from --vm" "sandbox-imac-hclaro-vm" "$plist_content"
 
 if command -v python3 >/dev/null 2>&1; then
 	plist_check=$(python3 -c "
@@ -414,7 +435,7 @@ fi
 # second apply run, nothing changed: no new bootout/bootstrap
 SUDO_LOG="$SANDBOX/sudo-2.log"; : >"$SUDO_LOG"
 LAUNCHCTL_LOG="$SANDBOX/launchctl-2.log"; : >"$LAUNCHCTL_LOG"
-status=$(run_setup "$SETUP_HOME" --vm sandbox-hclaro)
+status=$(run_setup "$SETUP_HOME" --vm sandbox-imac-hclaro-vm)
 check "second identical apply -> exit 0" "0" "$status"
 bootstrap_calls=$(grep -c '^launchctl bootstrap ' "$LAUNCHCTL_LOG" || true)
 check "identical + loaded -> bootstrap NOT called again" "0" "$bootstrap_calls"
@@ -427,6 +448,16 @@ status=$(run_setup "$SETUP_HOME" --vm other-vm)
 check "changed content apply -> exit 0" "0" "$status"
 bootstrap_calls=$(grep -c '^launchctl bootstrap ' "$LAUNCHCTL_LOG" || true)
 check "changed content -> bootstrap called again" "1" "$bootstrap_calls"
+
+# no --vm given -> UTM_VM_NAME=sandbox-imac-hclaro-vm rendered into the LaunchAgent
+HOME_DEFAULTVM="$SANDBOX/setup-home-default-vm"
+LAUNCHCTL_LOG="$SANDBOX/launchctl-default-vm.log"; : >"$LAUNCHCTL_LOG"
+UTMCTL_LIST_OUTPUT="sandbox-imac-hclaro-vm"
+export UTMCTL_LIST_OUTPUT
+status=$(run_setup "$HOME_DEFAULTVM")
+check "apply without --vm -> exit 0" "0" "$status"
+default_plist_content=$(cat "$HOME_DEFAULTVM/Library/LaunchAgents/dotfiles.utm-autostart.plist" 2>/dev/null || echo "MISSING")
+contains "apply without --vm -> LaunchAgent has default VM name sandbox-imac-hclaro-vm" "sandbox-imac-hclaro-vm" "$default_plist_content"
 
 # --check, everything good -> exit 0, nothing mutating called
 SUDO_LOG="$SANDBOX/sudo-check-good.log"; : >"$SUDO_LOG"
@@ -441,7 +472,7 @@ launchctl_mut=$(grep -Ec '^launchctl (bootout|bootstrap) ' "$LAUNCHCTL_LOG" || t
 check "--check all good -> no launchctl bootout/bootstrap" "0" "$launchctl_mut"
 out=$(cat "$SANDBOX/setup-out")
 not_contains "--check all good -> no pending lines" "pending" "$out"
-UTMCTL_LIST_OUTPUT="sandbox-hclaro"
+UTMCTL_LIST_OUTPUT="sandbox-imac-hclaro-vm"
 export UTMCTL_LIST_OUTPUT
 
 # --check with sleep=1/autorestart=0 -> pending, exit 1, no sudo
@@ -458,7 +489,7 @@ contains "--check bad power -> reports pending" "pending" "$out"
 # apply with bad power -> exactly one sudo pmset -a call with the exact args
 SUDO_LOG="$SANDBOX/sudo-apply-bad.log"; : >"$SUDO_LOG"
 PMSET_LOG="$SANDBOX/pmset-apply-bad.log"; : >"$PMSET_LOG"
-status=$(run_setup "$SANDBOX/setup-home-applybad" --vm sandbox-hclaro)
+status=$(run_setup "$SANDBOX/setup-home-applybad" --vm sandbox-imac-hclaro-vm)
 check "apply bad power -> exit 0" "0" "$status"
 pmset_a_calls=$(grep -c '^sudo pmset -a ' "$SUDO_LOG" || true)
 check "apply bad power -> exactly one sudo pmset -a call" "1" "$pmset_a_calls"
@@ -471,7 +502,7 @@ export PMSET_G_OUTPUT
 
 # already correct power -> no pmset -a write
 SUDO_LOG="$SANDBOX/sudo-apply-good.log"; : >"$SUDO_LOG"
-status=$(run_setup "$SANDBOX/setup-home-applygood" --vm sandbox-hclaro)
+status=$(run_setup "$SANDBOX/setup-home-applygood" --vm sandbox-imac-hclaro-vm)
 check "apply good power -> exit 0" "0" "$status"
 pmset_a_calls=$(grep -c '^sudo pmset -a ' "$SUDO_LOG" || true)
 check "apply good power -> no pmset -a write" "0" "$pmset_a_calls"
@@ -480,7 +511,7 @@ check "apply good power -> no pmset -a write" "0" "$pmset_a_calls"
 SUDO_LOG="$SANDBOX/sudo-freeze-on.log"; : >"$SUDO_LOG"
 SYSTEMSETUP_RESTARTFREEZE=On
 export SYSTEMSETUP_RESTARTFREEZE
-status=$(run_setup "$SANDBOX/setup-home-freezeon" --vm sandbox-hclaro)
+status=$(run_setup "$SANDBOX/setup-home-freezeon" --vm sandbox-imac-hclaro-vm)
 check "restartfreeze already On -> exit 0" "0" "$status"
 freeze_calls=$(grep -c '^sudo systemsetup -setrestartfreeze ' "$SUDO_LOG" || true)
 check "restartfreeze already On -> not applied again" "0" "$freeze_calls"
@@ -489,7 +520,7 @@ check "restartfreeze already On -> not applied again" "0" "$freeze_calls"
 SUDO_LOG="$SANDBOX/sudo-freeze-off.log"; : >"$SUDO_LOG"
 SYSTEMSETUP_RESTARTFREEZE=Off
 export SYSTEMSETUP_RESTARTFREEZE
-status=$(run_setup "$SANDBOX/setup-home-freezeoff" --vm sandbox-hclaro)
+status=$(run_setup "$SANDBOX/setup-home-freezeoff" --vm sandbox-imac-hclaro-vm)
 check "restartfreeze Off -> exit 0" "0" "$status"
 freeze_calls=$(grep -c '^sudo systemsetup -setrestartfreeze on' "$SUDO_LOG" || true)
 check "restartfreeze Off -> applied exactly once" "1" "$freeze_calls"
@@ -500,13 +531,72 @@ export SYSTEMSETUP_RESTARTFREEZE
 DEFAULTS_AUTOLOGIN_USER=""
 FDESETUP_STATUS="FileVault is On."
 export DEFAULTS_AUTOLOGIN_USER FDESETUP_STATUS
-status=$(run_setup "$SANDBOX/setup-home-autologin" --vm sandbox-hclaro)
+status=$(run_setup "$SANDBOX/setup-home-autologin" --vm sandbox-imac-hclaro-vm)
 out=$(cat "$SANDBOX/setup-out")
 contains "autologin missing -> manual steps" "Login Options" "$out"
 contains "autologin missing -> FileVault status reported" "FileVault is On." "$out"
 DEFAULTS_AUTOLOGIN_USER="$CURRENT_USER"
 FDESETUP_STATUS="FileVault is Off."
 export DEFAULTS_AUTOLOGIN_USER FDESETUP_STATUS
+
+# ==============================================================================
+# Root-owned ~/Library/LaunchAgents (an adware installer left it that way).
+# ==============================================================================
+echo
+echo "root-owned ~/Library/LaunchAgents"
+
+# owner root -> pending with chown hint, no cp/bootstrap, apply exits 0
+HOME_ROOTLA="$SANDBOX/setup-home-root-la"
+rm -rf "$HOME_ROOTLA"; mkdir -p "$HOME_ROOTLA/Library/LaunchAgents"
+LAUNCHCTL_LOG="$SANDBOX/launchctl-root-la.log"; : >"$LAUNCHCTL_LOG"
+STAT_OWNER=root
+export STAT_OWNER
+status=$(run_setup "$HOME_ROOTLA" --vm sandbox-imac-hclaro-vm)
+check "root-owned LaunchAgents apply -> exit 0" "0" "$status"
+out=$(cat "$SANDBOX/setup-out")
+contains "root-owned LaunchAgents -> pending message" "pending: ~/Library/LaunchAgents is owned by root, not $CURRENT_USER" "$out"
+contains "root-owned LaunchAgents -> chown hint" "sudo chown $CURRENT_USER:staff ~/Library/LaunchAgents" "$out"
+contains "root-owned LaunchAgents -> mentions inspecting LaunchDaemons" "/Library/LaunchDaemons" "$out"
+bootstrap_calls=$(grep -c '^launchctl bootstrap ' "$LAUNCHCTL_LOG" || true)
+check "root-owned LaunchAgents -> bootstrap NOT called" "0" "$bootstrap_calls"
+[ -f "$HOME_ROOTLA/Library/LaunchAgents/dotfiles.utm-autostart.plist" ] && plist_written=yes || plist_written=no
+check "root-owned LaunchAgents -> plist NOT written (no cp)" "no" "$plist_written"
+
+# owner root, --check -> same pending message, exit 1
+status=$(run_setup "$HOME_ROOTLA" --vm sandbox-imac-hclaro-vm --check)
+check "root-owned LaunchAgents --check -> exit 1" "1" "$status"
+out=$(cat "$SANDBOX/setup-out")
+contains "root-owned LaunchAgents --check -> same pending message" "pending: ~/Library/LaunchAgents is owned by root, not $CURRENT_USER" "$out"
+unset STAT_OWNER
+
+# owner = current user -> unchanged behaviour
+HOME_OWNEROK="$SANDBOX/setup-home-owner-ok"
+rm -rf "$HOME_OWNEROK"; mkdir -p "$HOME_OWNEROK/Library/LaunchAgents"
+LAUNCHCTL_LOG="$SANDBOX/launchctl-owner-ok.log"; : >"$LAUNCHCTL_LOG"
+STAT_OWNER="$CURRENT_USER"
+export STAT_OWNER
+status=$(run_setup "$HOME_OWNEROK" --vm sandbox-imac-hclaro-vm)
+check "owner=user -> exit 0" "0" "$status"
+[ -f "$HOME_OWNEROK/Library/LaunchAgents/dotfiles.utm-autostart.plist" ] && plist_written=yes || plist_written=no
+check "owner=user -> plist written" "yes" "$plist_written"
+bootstrap_calls=$(grep -c '^launchctl bootstrap ' "$LAUNCHCTL_LOG" || true)
+check "owner=user -> bootstrap called" "1" "$bootstrap_calls"
+unset STAT_OWNER
+
+# cp itself fails -> pending with the cp error hint, no bootstrap
+HOME_CPFAIL="$SANDBOX/setup-home-cpfail"
+rm -rf "$HOME_CPFAIL"; mkdir -p "$HOME_CPFAIL/Library/LaunchAgents"
+echo stale >"$HOME_CPFAIL/Library/LaunchAgents/dotfiles.utm-autostart.plist"
+chmod 444 "$HOME_CPFAIL/Library/LaunchAgents/dotfiles.utm-autostart.plist"
+LAUNCHCTL_LOG="$SANDBOX/launchctl-cpfail.log"; : >"$LAUNCHCTL_LOG"
+status=$(run_setup "$HOME_CPFAIL" --vm sandbox-imac-hclaro-vm)
+check "cp failure -> exit 0" "0" "$status"
+out=$(cat "$SANDBOX/setup-out")
+contains "cp failure -> pending" "pending:" "$out"
+contains "cp failure -> mentions LaunchAgent" "LaunchAgent" "$out"
+bootstrap_calls=$(grep -c '^launchctl bootstrap ' "$LAUNCHCTL_LOG" || true)
+check "cp failure -> bootstrap NOT called" "0" "$bootstrap_calls"
+chmod 644 "$HOME_CPFAIL/Library/LaunchAgents/dotfiles.utm-autostart.plist"
 
 # ==============================================================================
 # Portability: forbidden bashisms/GNU-isms in the two Mac scripts.
