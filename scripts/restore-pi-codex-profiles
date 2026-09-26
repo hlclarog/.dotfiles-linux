@@ -114,8 +114,10 @@ def restore(replace=False):
             return
         conflicts = [name for name in pending_names if name in registry["profiles"]]
         if not replace and conflicts:
-            raise UnsafeRestore(f"Profile {', '.join(conflicts)} conflicts with the trusted source; "
-                                "inspect it manually. Nothing changed.")
+            subject, verb, pronoun = (("Profiles", "conflict", "them") if len(conflicts) > 1
+                                      else ("Profile", "conflicts", "it"))
+            raise UnsafeRestore(f"{subject} {', '.join(conflicts)} {verb} with the trusted source; "
+                                f"inspect {pronoun} manually. Nothing changed.")
         for name in pending_names:
             registry["profiles"][name] = profiles[name]
     else:

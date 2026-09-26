@@ -159,6 +159,17 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.backups(), [])
         self.assert_safe_output(result)
 
+    def test_conflict_in_both_profiles_names_both(self):
+        conflicted = {name: {**profile, "orchestrator": {"model": "openai-codex/other", "thinking": "high"}}
+                      for name, profile in self.profiles.items()}
+        before = self.seed(self.registry(profiles=conflicted))
+        result = self.run_restore()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(f"Profiles {', '.join(NAMES)} conflict with the trusted source", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.backups(), [])
+        self.assert_safe_output(result)
+
     def test_malformed_live_refused_without_write(self):
         self.target.parent.mkdir(parents=True)
         for raw in ("{not json", json.dumps(self.registry(version=2)),
