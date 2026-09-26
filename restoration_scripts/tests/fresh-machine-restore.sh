@@ -62,6 +62,7 @@ DOTFILES_PATH="${DOTFILES_PATH:-$(cd "$(dirname "$0")/../.." && pwd)}"
 export DOTFILES_PATH
 BREWFILE="$DOTFILES_PATH/os/linux/brew/Brewfile"
 SCRIPT_04="$DOTFILES_PATH/restoration_scripts/04-brew-packages.sh"
+SCRIPT_04_CLAUDE="$DOTFILES_PATH/restoration_scripts/04-claude-code.sh"
 SCRIPT_17="$DOTFILES_PATH/restoration_scripts/17-default-shell.sh"
 SCRIPT_08="$DOTFILES_PATH/restoration_scripts/08-pi.sh"
 SCRIPT_09="$DOTFILES_PATH/restoration_scripts/09-gentle-ai-sync.sh"
@@ -719,6 +720,7 @@ check "case h: resets root from a Homebrew prefix to /bin/bash" "chsh -s /bin/ba
 # Case (i): 17 must sort after 04 and be committed executable; 00 must be gone.
 ordered_17=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|17)-')
 expected_order_17="04-brew-packages.sh
+04-claude-code.sh
 17-default-shell.sh"
 check "case i: 17 sorts after 04-brew-packages.sh" "$expected_order_17" "$ordered_17"
 [ -x "$SCRIPT_17" ] && script_17_exec=yes || script_17_exec=no
@@ -880,6 +882,177 @@ mkdir -p "$HOME_LOOP04"
 ) >"$SANDBOX/out-loop04" 2>&1
 log_loop04=$(cat "$LOOP_LOG")
 contains "real 04-brew-packages.sh via the loop: the marker script after it still runs" "marker" "$log_loop04"
+
+# ==============================================================================
+# 04-claude-code.sh -- installs Claude Code from Anthropic's native installer
+# instead of the lagging Homebrew cask, and retires that cask once the
+# native binary works.
+# ==============================================================================
+echo
+echo "04-claude-code.sh"
+
+CLAUDE_LOG="$SANDBOX/claude-install.log"
+export CLAUDE_LOG
+mkdir -p "$SANDBOX/stub04claude"
+
+cat >"$SANDBOX/stub04claude/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >>"$CLAUDE_LOG"
+[ "${CLAUDE_CURL_FAIL:-0}" = "1" ] && exit 1
+dest=""
+prev=""
+for arg in "$@"; do
+	[ "$prev" = "-o" ] && dest="$arg"
+	prev="$arg"
+done
+cat >"$dest" <<'INSTALLER'
+#!/usr/bin/env bash
+echo "installer $*" >>"$CLAUDE_LOG"
+echo "BASH_VERSINFO:${BASH_VERSINFO[0]:-unset}" >>"$CLAUDE_LOG"
+if [ -t 0 ]; then
+	echo "stdin-tty:yes" >>"$CLAUDE_LOG"
+else
+	echo "stdin-tty:no" >>"$CLAUDE_LOG"
+fi
+if [ "${CLAUDE_INSTALLER_INSTALLS:-1}" = "1" ]; then
+	mkdir -p "$HOME/.local/bin"
+	printf '#!/usr/bin/env bash\necho "1.2.283 (Claude Code)"\n' >"$HOME/.local/bin/claude"
+	chmod +x "$HOME/.local/bin/claude"
+fi
+INSTALLER
+chmod +x "$dest"
+STUB
+chmod +x "$SANDBOX/stub04claude/curl"
+
+cat >"$SANDBOX/stub04claude/sudo" <<'STUB'
+#!/usr/bin/env bash
+echo "sudo $*" >>"$CLAUDE_LOG"
+exit 1
+STUB
+chmod +x "$SANDBOX/stub04claude/sudo"
+
+cat >"$SANDBOX/stub04claude/brew" <<'STUB'
+#!/usr/bin/env bash
+echo "brew $*" >>"$CLAUDE_LOG"
+if [ "$1" = list ] && [ "$2" = "--cask" ] && [ "$3" = "claude-code" ]; then
+	exit "${CLAUDE_BREW_CASK_EXIT:-1}"
+fi
+if [ "$1" = uninstall ] && [ "$2" = "--cask" ] && [ "$3" = "claude-code" ]; then
+	exit "${CLAUDE_BREW_UNINSTALL_EXIT:-0}"
+fi
+exit 0
+STUB
+chmod +x "$SANDBOX/stub04claude/brew"
+
+BASE_CLAUDE_PATH="$SANDBOX/stub04claude:/usr/bin:/bin"
+
+run04claude() {
+	(
+		HOME="$1"
+		PATH="$2"
+		CLAUDE_INSTALL_URL="${3:-https://example.test/claude-install.sh}"
+		CLAUDE_CURL_FAIL="${4:-0}"
+		CLAUDE_INSTALLER_INSTALLS="${5:-1}"
+		CLAUDE_BREW_CASK_EXIT="${6:-1}"
+		CLAUDE_BREW_UNINSTALL_EXIT="${7:-0}"
+		export HOME PATH CLAUDE_INSTALL_URL CLAUDE_CURL_FAIL CLAUDE_INSTALLER_INSTALLS \
+			CLAUDE_BREW_CASK_EXIT CLAUDE_BREW_UNINSTALL_EXIT CLAUDE_LOG
+		. "$SCRIPT_04_CLAUDE"
+	) >"$SANDBOX/out04claude" 2>&1
+	echo $?
+}
+
+# Case (a): native already installed -> no curl, message reports the version.
+HOME_CLAUDE_A="$SANDBOX/home-claude-a"
+mkdir -p "$HOME_CLAUDE_A/.local/bin"
+printf '#!/usr/bin/env bash\necho "1.2.283 (Claude Code)"\n' >"$HOME_CLAUDE_A/.local/bin/claude"
+chmod +x "$HOME_CLAUDE_A/.local/bin/claude"
+: >"$CLAUDE_LOG"
+status_claude_a=$(run04claude "$HOME_CLAUDE_A" "$SANDBOX/stub04claude:/usr/bin:/bin")
+out_claude_a=$(cat "$SANDBOX/out04claude")
+check "case a: returns success" "0" "$status_claude_a"
+curl_calls_claude_a=$(grep -c '^curl ' "$CLAUDE_LOG")
+check "case a: curl is not called" "0" "$curl_calls_claude_a"
+contains "case a: reports already installed with the version" \
+	" > Claude Code already installed natively (1.2.283 (Claude Code))" "$out_claude_a"
+
+# Case (b): fresh machine -> curl fetches CLAUDE_INSTALL_URL, the installer
+# runs with bash (not sudo) and stdin not a tty, success message with version.
+HOME_CLAUDE_B="$SANDBOX/home-claude-b"
+mkdir -p "$HOME_CLAUDE_B"
+: >"$CLAUDE_LOG"
+status_claude_b=$(run04claude "$HOME_CLAUDE_B" "$BASE_CLAUDE_PATH" "https://example.test/claude-install.sh")
+out_claude_b=$(cat "$SANDBOX/out04claude")
+check "case b: returns success" "0" "$status_claude_b"
+curl_call_claude_b=$(grep '^curl ' "$CLAUDE_LOG")
+contains "case b: curl uses -fsSL" "-fsSL" "$curl_call_claude_b"
+contains "case b: curl fetches CLAUDE_INSTALL_URL" "https://example.test/claude-install.sh" "$curl_call_claude_b"
+bash_versinfo_b=$(grep '^BASH_VERSINFO:' "$CLAUDE_LOG")
+if [ "$bash_versinfo_b" = "BASH_VERSINFO:unset" ]; then
+	claude_ran_as_bash_b=no
+else
+	claude_ran_as_bash_b=yes
+fi
+check "case b: installer runs under bash, not plain sh" "yes" "$claude_ran_as_bash_b"
+stdin_tty_claude_b=$(grep '^stdin-tty:' "$CLAUDE_LOG")
+check "case b: installer's stdin is not a tty" "stdin-tty:no" "$stdin_tty_claude_b"
+sudo_calls_claude_b=$(grep -c '^sudo ' "$CLAUDE_LOG")
+check "case b: sudo is never called" "0" "$sudo_calls_claude_b"
+contains "case b: reports installed with the version" \
+	" > Claude Code installed natively (1.2.283 (Claude Code))" "$out_claude_b"
+
+# Case (c): download fails -> failure hint, status 0, no brew uninstall.
+HOME_CLAUDE_C="$SANDBOX/home-claude-c"
+mkdir -p "$HOME_CLAUDE_C"
+: >"$CLAUDE_LOG"
+status_claude_c=$(run04claude "$HOME_CLAUDE_C" "$BASE_CLAUDE_PATH" "" 1 1 0 0)
+out_claude_c=$(cat "$SANDBOX/out04claude")
+check "case c: returns success" "0" "$status_claude_c"
+contains "case c: prints a failure hint" \
+	"curl -fsSL https://claude.ai/install.sh | bash" "$out_claude_c"
+brew_uninstall_calls_c=$(grep -c '^brew uninstall' "$CLAUDE_LOG")
+check "case c: brew uninstall is never called" "0" "$brew_uninstall_calls_c"
+
+# Case (d): native OK, and the Homebrew cask is present -> it is removed with
+# exactly `brew uninstall --cask claude-code`.
+HOME_CLAUDE_D="$SANDBOX/home-claude-d"
+mkdir -p "$HOME_CLAUDE_D/.local/bin"
+printf '#!/usr/bin/env bash\necho "1.2.283 (Claude Code)"\n' >"$HOME_CLAUDE_D/.local/bin/claude"
+chmod +x "$HOME_CLAUDE_D/.local/bin/claude"
+: >"$CLAUDE_LOG"
+status_claude_d=$(run04claude "$HOME_CLAUDE_D" "$BASE_CLAUDE_PATH" "" 0 1 0 0)
+out_claude_d=$(cat "$SANDBOX/out04claude")
+check "case d: returns success" "0" "$status_claude_d"
+uninstall_calls_d=$(grep -c '^brew uninstall --cask claude-code$' "$CLAUDE_LOG")
+check "case d: brew uninstall --cask claude-code runs exactly once" "1" "$uninstall_calls_d"
+contains "case d: reports the cask removed" \
+	" > Removed the Homebrew claude-code cask (the native install replaces it)" "$out_claude_d"
+
+# Case (e): native OK, no cask present -> no uninstall attempted.
+HOME_CLAUDE_E="$SANDBOX/home-claude-e"
+mkdir -p "$HOME_CLAUDE_E/.local/bin"
+printf '#!/usr/bin/env bash\necho "1.2.283 (Claude Code)"\n' >"$HOME_CLAUDE_E/.local/bin/claude"
+chmod +x "$HOME_CLAUDE_E/.local/bin/claude"
+: >"$CLAUDE_LOG"
+status_claude_e=$(run04claude "$HOME_CLAUDE_E" "$BASE_CLAUDE_PATH" "" 0 1 1 0)
+check "case e: returns success" "0" "$status_claude_e"
+list_calls_e=$(grep -c '^brew list --cask claude-code$' "$CLAUDE_LOG")
+check "case e: brew list --cask claude-code is checked" "1" "$list_calls_e"
+uninstall_calls_e=$(grep -c '^brew uninstall' "$CLAUDE_LOG")
+check "case e: brew uninstall is never called" "0" "$uninstall_calls_e"
+
+# Case (f): the installer ran but the binary is still missing -> failure
+# hint, and brew is never consulted.
+HOME_CLAUDE_F="$SANDBOX/home-claude-f"
+mkdir -p "$HOME_CLAUDE_F"
+: >"$CLAUDE_LOG"
+status_claude_f=$(run04claude "$HOME_CLAUDE_F" "$BASE_CLAUDE_PATH" "" 0 0 0 0)
+out_claude_f=$(cat "$SANDBOX/out04claude")
+check "case f: returns success" "0" "$status_claude_f"
+contains "case f: prints a failure hint" \
+	"curl -fsSL https://claude.ai/install.sh | bash" "$out_claude_f"
+brew_calls_f=$(grep -c '^brew ' "$CLAUDE_LOG")
+check "case f: brew is never called" "0" "$brew_calls_f"
 
 # ==============================================================================
 # 08-pi.sh -- installs Pi itself and seeds it to match the reference machine.
@@ -1827,6 +2000,7 @@ echo "restoration_scripts ordering"
 
 ordered=$(cd "$DOTFILES_PATH/restoration_scripts" && ls -- *.sh | sort | grep -E '^(04|06|07|08|09|10|11|12|14|15|16)-')
 expected_order="04-brew-packages.sh
+04-claude-code.sh
 06-gentle-ai-state.sh
 07-node.sh
 08-pi.sh
@@ -1844,6 +2018,11 @@ check "15-rust.sh is executable" "yes" "$script_15_exec"
 check "case h: 16-tailscale.sh is executable" "yes" "$script_16_exec"
 [ -x "$SCRIPT_04" ] && script_04_exec=yes || script_04_exec=no
 check "04-brew-packages.sh is executable" "yes" "$script_04_exec"
+[ -x "$SCRIPT_04_CLAUDE" ] && script_04_claude_exec=yes || script_04_claude_exec=no
+check "case g: 04-claude-code.sh sorts after 04-brew-packages.sh and before 08-pi.sh, and is executable" "yes" "$script_04_claude_exec"
+
+claude_cask_in_brewfile=$(grep -c 'cask "claude-code"' "$BREWFILE")
+check "case h: the Brewfile no longer declares cask \"claude-code\"" "0" "$claude_cask_in_brewfile"
 [ -x "$SCRIPT_08" ] && script_08_exec=yes || script_08_exec=no
 check "08-pi.sh is executable" "yes" "$script_08_exec"
 [ -x "$SCRIPT_09" ] && script_09_exec=yes || script_09_exec=no

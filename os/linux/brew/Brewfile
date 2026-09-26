@@ -76,8 +76,6 @@ brew "anomalyco/tap/opencode", trusted: true
 # `cask "openai"` is never recognized as belonging to the openai/tools tap and
 # the trust flag is silently ignored. Every entry from a third-party tap must
 # therefore be written as tap/name AND marked trusted: true.
-# Claude Code CLI
-cask "claude-code"
 # OpenAI Codex CLI
 cask "codex"
 # OpenAI CLI
