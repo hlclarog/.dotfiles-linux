@@ -293,6 +293,14 @@ contains "everything-done: zerotier is untouched and optional, not configured" \
 	"optional (not configured)" "$OUTPUT"
 check "everything-done: zerotier-cli was never even probed" "" "$(log_of zerotier-cli)"
 
+# Same machine without cloud sync: engram-cloud is optional, so still done.
+rm -f "$TEST_HOME/.engram/cloud.json"
+ENGRAM_READY=0
+run_secrets "" --check
+contains "engram-cloud unconfigured shows optional" "engram-cloud  optional (not configured)" "$OUTPUT"
+check "engram-cloud unconfigured does not fail --check" "0" "$RC"
+ENGRAM_READY=1
+
 echo
 # ==============================================================================
 # --check: everything pending -> every step listed pending, exit 1, only
@@ -320,7 +328,8 @@ export SSHD_DROPIN_DIR
 run_secrets "" --check
 check "everything-pending exit code is 1" "1" "$RC"
 pending_count=$(printf '%s' "$OUTPUT" | grep -c 'pending')
-check "everything-pending: all 11 steps mention pending" "11" "$pending_count"
+check "everything-pending: the 10 non-optional-cloud steps mention pending" "10" "$pending_count"
+contains "everything-pending: engram-cloud is optional, not pending" "engram-cloud  optional (not configured)" "$OUTPUT"
 check "no gh login was attempted" "" "$(log_of gh | grep -v 'auth status' || true)"
 check "no ssh-keygen ran" "" "$(log_of ssh-keygen)"
 check "no pi launch ran" "" "$(log_of pi)"
@@ -427,7 +436,7 @@ echo
 # ==============================================================================
 echo "engram: credential capture"
 reset_test_env
-POST_RESTORE_ONLY=engram
+POST_RESTORE_ONLY=engram-cloud
 TOKEN="s3cret-test-token-value"
 run_secrets "y
 https://example.test/engram
@@ -441,6 +450,12 @@ check "cloud.json has exactly server_url and token" '["server_url","token"]' "$k
 server_url=$(jq -r '.server_url' "$TEST_HOME/.engram/cloud.json" 2>/dev/null)
 check "cloud.json stores the entered server URL" "https://example.test/engram" "$server_url"
 not_contains "the token never appears in the script output" "$TOKEN" "$OUTPUT"
+
+# The step id is what --check prints, so it names the cloud sync explicitly.
+reset_test_env
+run_secrets "" --check
+contains "--check names the step engram-cloud" "engram-cloud" "$OUTPUT"
+
 
 echo
 # ==============================================================================
