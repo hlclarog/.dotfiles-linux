@@ -29,6 +29,7 @@ anything.
 | apt | `apt-get update`/`full-upgrade`, installs the packages from section 2 below plus `openssh-server`, `zram-tools`, `cloud-guest-utils` and `qemu-guest-agent` | same prerequisites as a manual install, plus what the later steps need |
 | disk (server only) | grows the root LV (or partition) to use the whole disk | the Ubuntu Server installer's guided LVM layout leaves most of the volume group unallocated by default |
 | zram (server only) | configures zstd-compressed zram swap, on top of the installer's disk swap file kept as a fallback | a 6 GB RAM VM is tight; RAM-backed compressed swap is far cheaper than the disk swapfile |
+| panic (server only) | sets `kernel.panic = 10` in `/etc/sysctl.d/99-panic-reboot.conf` | a panicked VM would otherwise hang forever while UTM still reports it as started, so the Mac watchdog never restarts it |
 | guest-agent (server only) | enables `qemu-guest-agent` | lets the Mac host (UTM) shut the VM down cleanly and read its IP with `utmctl` |
 | timezone (server only) | sets the system timezone (default `America/Bogota`, override with `--timezone <Zone>`) | the installer defaults to UTC and never asks again |
 | sshd | enables the ssh server | needed for remote access; hardening is left to the dotfiles restore, once `authorized_keys` exists |
