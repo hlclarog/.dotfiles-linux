@@ -18,6 +18,11 @@
 #   - zram: a 6 GB RAM VM is tight; zram trades a little CPU for compressed
 #     RAM-backed swap, which is far cheaper than the installer's disk swap
 #     file. That disk swap is kept as a lower-priority fallback, not removed.
+#   - panic: measured on the restored VM, kernel.panic was 0, so a kernel
+#     panic leaves the VM hung forever; UTM still reports it as started, so
+#     the Mac host's watchdog never restarts it. kernel.panic=10 reboots it
+#     after 10 s, and the VM's services (tailscaled, ssh, engram) come back
+#     on their own.
 #   - guest-agent: qemu-guest-agent is what lets the Mac host (UTM) shut this
 #     VM down cleanly and query its IP with `utmctl`; without it the host can
 #     only hard-kill the VM.
@@ -67,7 +72,7 @@ LINUXBREW_PREFIX="${LINUXBREW_PREFIX:-/home/linuxbrew/.linuxbrew}"
 BREW_BIN="$LINUXBREW_PREFIX/bin/brew"
 RESTORER_URL="https://raw.githubusercontent.com/CodelyTV/dotly/HEAD/restorer"
 
-STEP_ORDER=(apt disk zram guest-agent timezone sshd brew restore)
+STEP_ORDER=(apt disk zram panic guest-agent timezone sshd brew restore)
 declare -A RESULT=()
 
 is_int() {
@@ -209,6 +214,11 @@ disk_step_lvm_estimate() {
 	if [ "$free_est" -gt "$GIB" ]; then
 		gib_est=$((free_est / GIB))
 		echo "  pending: about ${gib_est} GiB unallocated in $vg (estimated with lsblk; run without --check to extend; partition growth unknown without sudo)"
+	elif [ "$pv_size" -gt 0 ] && [ "$lv_sum" -gt 0 ]; then
+		# lsblk measured both sizes: the LVs fill the PV (the remainder is LVM
+		# metadata), so the volume group has nothing left to give.
+		RESULT[disk]=ok
+		echo "✓ disk: root logical volume already fills $vg (estimated with lsblk; partition growth not checked without sudo)"
 	else
 		echo "  pending: could not confirm free space in $vg without sudo (estimated with lsblk; run without --check to check the disk; partition growth unknown without sudo)"
 	fi
@@ -411,6 +421,61 @@ step_zram() {
 	esac
 }
 
+# --- step 3b: panic -------------------------------------------------------------
+SYSCTL_PANIC_FILE="${SYSCTL_PANIC_FILE:-/etc/sysctl.d/99-panic-reboot.conf}"
+
+render_panic_sysctl() {
+	cat <<'EOF'
+# Reboot 10 s after a kernel panic instead of hanging (written by bootstrap-linux).
+kernel.panic = 10
+EOF
+}
+
+step_panic() {
+	echo "-- panic: reboot after a kernel panic instead of hanging forever --"
+	if is_wsl; then
+		RESULT[panic]="skip:WSL"
+		echo "  WSL detected: panic step skipped (WSL's kernel is managed by Windows)"
+		return
+	fi
+
+	local wanted file_ok=1 live_ok=0
+	wanted=$(render_panic_sysctl)
+	# Only the setting matters: a file written by hand without the comment
+	# line is just as configured.
+	grep -Eq '^[[:space:]]*kernel\.panic[[:space:]]*=[[:space:]]*10[[:space:]]*$' "$SYSCTL_PANIC_FILE" 2>/dev/null || file_ok=0
+	[ "$(sysctl -n kernel.panic 2>/dev/null)" = "10" ] && live_ok=1
+
+	if [ "$file_ok" = 1 ] && [ "$live_ok" = 1 ]; then
+		RESULT[panic]=ok
+		echo "✓ panic: configured and active"
+		return
+	fi
+
+	if [ "$CHECK_ONLY" = 1 ]; then
+		RESULT[panic]=pending
+		return
+	fi
+
+	sudo -v
+	if [ "$file_ok" = 0 ]; then
+		local tmp
+		tmp=$(mktemp)
+		printf '%s\n' "$wanted" >"$tmp"
+		sudo install -m 644 "$tmp" "$SYSCTL_PANIC_FILE"
+		rm -f "$tmp"
+	fi
+	sudo sysctl -p "$SYSCTL_PANIC_FILE" >/dev/null
+
+	if [ "$(sysctl -n kernel.panic 2>/dev/null)" = "10" ]; then
+		RESULT[panic]=ok
+		echo "✓ panic: configured and active"
+	else
+		RESULT[panic]=pending
+		echo "  hint: 'sysctl -n kernel.panic' did not report 10; check $SYSCTL_PANIC_FILE by hand."
+	fi
+}
+
 # --- step 4: guest-agent -------------------------------------------------------
 step_guest_agent() {
 	echo "-- guest-agent: QEMU guest agent (lets the Mac host shut this VM down cleanly and query its IP with utmctl) --"
@@ -605,6 +670,7 @@ main() {
 	step_apt
 	step_disk
 	step_zram
+	step_panic
 	step_guest_agent
 	step_timezone
 	step_sshd

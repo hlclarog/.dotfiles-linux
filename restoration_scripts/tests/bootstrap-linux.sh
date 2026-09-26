@@ -262,6 +262,9 @@ STUB
 cat >"$STUBBIN/sysctl" <<'STUB'
 #!/usr/bin/env bash
 echo "sysctl $*" >>"$CMD_LOG"
+if [ "$1" = "-n" ] && [ "$2" = "kernel.panic" ]; then
+	echo "${SYSCTL_KERNEL_PANIC:-0}"
+fi
 exit 0
 STUB
 
@@ -348,6 +351,7 @@ export CMD_LOG UNAME_S ID_U BOOTSTRAP_PROC_VERSION_FILE DPKG_MISSING \
 	LSBLK_PKNAME LSBLK_PARTN LSBLK_PV_PART LSBLK_PV_SIZE_B LSBLK_LVM_CHILDREN \
 	GROWPART_DRYRUN_OUTPUT GROWPART_DRYRUN_EXIT SUDO_N_FAILS \
 	ZRAM_DEFAULTS_FILE SYSCTL_ZRAM_FILE SWAPON_SHOW_FILE SS_OUTPUT_FILE \
+	SYSCTL_PANIC_FILE SYSCTL_KERNEL_PANIC \
 	SYSTEMCTL_STATE_DIR SYSTEMCTL_START_FAIL TIMEDATECTL_STATE TIMEDATECTL_ZONES_FILE \
 	LINUXBREW_PREFIX CURL_WRITE_SRC BOOTSTRAP_TIMEZONE
 
@@ -374,6 +378,8 @@ reset_common() {
 	SUDO_N_FAILS=0
 	ZRAM_DEFAULTS_FILE="$SANDBOX/etc-default-zramswap-$RANDOM"
 	SYSCTL_ZRAM_FILE="$SANDBOX/etc-sysctl-zram-$RANDOM.conf"
+	SYSCTL_PANIC_FILE="$SANDBOX/etc-sysctl-panic-$RANDOM.conf"
+	SYSCTL_KERNEL_PANIC=0
 	SWAPON_SHOW_FILE="$SANDBOX/swapon-show-$RANDOM.txt"
 	: >"$SWAPON_SHOW_FILE"
 	SS_OUTPUT_FILE="$SANDBOX/ss-output-$RANDOM.txt"
@@ -439,9 +445,18 @@ SS_OUTPUT_FILE="$SANDBOX/ss-empty.txt"
 : >"$SS_OUTPUT_FILE"
 run_bootstrap "" "$SANDBOX/home-check-fresh" --check
 check "--check fresh -> exit 1" "1" "$RC"
-for step in apt disk zram guest-agent timezone sshd brew; do
+for step in apt disk zram panic guest-agent timezone sshd brew; do
 	contains "--check fresh -> $step pending" "$step" "$OUT"
 done
+zram_line=$(printf '%s\n' "$OUT" | grep -n '^zram ' | head -1 | cut -d: -f1)
+panic_line=$(printf '%s\n' "$OUT" | grep -n '^panic ' | head -1 | cut -d: -f1)
+guestagent_line=$(printf '%s\n' "$OUT" | grep -n '^guest-agent ' | head -1 | cut -d: -f1)
+order_ok=no
+if [ -n "$zram_line" ] && [ -n "$panic_line" ] && [ -n "$guestagent_line" ] &&
+	[ "$zram_line" -lt "$panic_line" ] && [ "$panic_line" -lt "$guestagent_line" ]; then
+	order_ok=yes
+fi
+check "summary table -> panic between zram and guest-agent" "yes" "$order_ok"
 mut=$(count 'apt-get install\|apt-get full-upgrade')
 check "--check fresh -> no apt-get install/upgrade" "0" "$mut"
 mut=$(count '^lvextend ')
@@ -499,6 +514,15 @@ mut=$(count '^growpart /dev/sda 3$')
 check "--check no sudo -> no real growpart" "0" "$mut"
 mut=$(count '^pvresize ')
 check "--check no sudo -> no pvresize" "0" "$mut"
+
+# Measured on the VM after the extension: the LV fills the PV except LVM's
+# few MiB of metadata. lsblk confirms that without sudo, so it is done.
+reset_common
+SUDO_N_FAILS=1
+LSBLK_LVM_CHILDREN="157781327872 lvm"
+run_bootstrap "" "$SANDBOX/home-disk-nosudo-full" --check
+disk_summary_line=$(printf '%s\n' "$OUT" | grep '^disk ')
+contains "--check no sudo, VG already full -> disk done" "done" "$disk_summary_line"
 
 # ==============================================================================
 # disk: vgs output unreadable even with sudo -- pending, never a false ok.
@@ -612,6 +636,74 @@ n=$(count 'sudo install -m 644')
 check "zram rerun -> no install/rewrite" "0" "$n"
 
 # ==============================================================================
+# panic: kernel.panic=10 reboots the VM instead of leaving it hung forever.
+# ==============================================================================
+echo
+echo "panic"
+
+reset_common
+run_bootstrap "" "$SANDBOX/home-panic-check-fresh" --check
+check "panic --check fresh -> file not written" "" "$(cat "$SYSCTL_PANIC_FILE" 2>/dev/null)"
+n=$(count "$SYSCTL_PANIC_FILE")
+check "panic --check fresh -> panic file never referenced" "0" "$n"
+n=$(count '^sysctl -p')
+check "panic --check fresh -> no sysctl -p" "0" "$n"
+
+reset_common
+run_bootstrap "n" "$SANDBOX/home-panic-apply"
+expected_panic=$'# Reboot 10 s after a kernel panic instead of hanging (written by bootstrap-linux).\nkernel.panic = 10'
+check "panic apply -> file content exact" "$expected_panic" "$(cat "$SYSCTL_PANIC_FILE")"
+n=$(grep -F "$SYSCTL_PANIC_FILE" "$CMD_LOG" | grep -c 'install -m 644')
+check "panic apply -> installed via sudo install" "1" "$n"
+n=$(grep -F "$SYSCTL_PANIC_FILE" "$CMD_LOG" | grep -c '^sysctl -p')
+check "panic apply -> sysctl -p run on the panic file" "1" "$n"
+
+reset_common
+cat >"$SYSCTL_PANIC_FILE" <<'EOF'
+# Reboot 10 s after a kernel panic instead of hanging (written by bootstrap-linux).
+kernel.panic = 10
+EOF
+SYSCTL_KERNEL_PANIC=10
+run_bootstrap "n" "$SANDBOX/home-panic-done"
+panic_summary_line=$(printf '%s\n' "$OUT" | grep '^panic ')
+contains "panic already configured -> summary shows done" "done" "$panic_summary_line"
+n=$(grep -F "$SYSCTL_PANIC_FILE" "$CMD_LOG" | grep -c 'install -m 644')
+check "panic already configured -> no rewrite" "0" "$n"
+n=$(grep -F "$SYSCTL_PANIC_FILE" "$CMD_LOG" | grep -c '^sysctl -p')
+check "panic already configured -> no sysctl -p call" "0" "$n"
+
+reset_common
+cat >"$SYSCTL_PANIC_FILE" <<'EOF'
+# Reboot 10 s after a kernel panic instead of hanging (written by bootstrap-linux).
+kernel.panic = 10
+EOF
+SYSCTL_KERNEL_PANIC=0
+content_before=$(cat "$SYSCTL_PANIC_FILE")
+run_bootstrap "n" "$SANDBOX/home-panic-live-stale"
+check "panic file correct, live stale -> file unchanged" "$content_before" "$(cat "$SYSCTL_PANIC_FILE")"
+n=$(grep -F "$SYSCTL_PANIC_FILE" "$CMD_LOG" | grep -c 'install -m 644')
+check "panic file correct, live stale -> no rewrite" "0" "$n"
+n=$(grep -F "$SYSCTL_PANIC_FILE" "$CMD_LOG" | grep -c '^sysctl -p')
+check "panic file correct, live stale -> sysctl -p applied" "1" "$n"
+
+# Measured on the VM: the setting was applied by hand with only the setting
+# line. It is configured and active, so it must count as done, not pending.
+reset_common
+printf 'kernel.panic = 10\n' >"$SYSCTL_PANIC_FILE"
+SYSCTL_KERNEL_PANIC=10
+run_bootstrap "" "$SANDBOX/home-panic-byhand" --check
+panic_summary_line=$(printf '%s\n' "$OUT" | grep '^panic ')
+contains "panic set by hand without the comment -> done" "done" "$panic_summary_line"
+
+# A file that sets another value is not done.
+reset_common
+printf 'kernel.panic = 0\n' >"$SYSCTL_PANIC_FILE"
+SYSCTL_KERNEL_PANIC=10
+run_bootstrap "" "$SANDBOX/home-panic-wrongvalue" --check
+panic_summary_line=$(printf '%s\n' "$OUT" | grep '^panic ')
+contains "panic file with another value -> pending" "pending" "$panic_summary_line"
+
+# ==============================================================================
 # guest-agent.
 # ==============================================================================
 echo
@@ -696,10 +788,10 @@ echo "WSL"
 reset_common
 BOOTSTRAP_PROC_VERSION_FILE="$PROC_WSL"
 run_bootstrap "n" "$SANDBOX/home-wsl" --skip-brew
-for step in disk zram guest-agent timezone; do
+for step in disk zram panic guest-agent timezone; do
 	contains "WSL -> $step skipped" "skip" "$OUT"
 done
-n=$(count '^lvextend \|^growpart /dev\|sudo install -m 644\|^systemctl start qemu-guest-agent$\|^timedatectl set-timezone')
+n=$(count '^lvextend \|^growpart /dev\|sudo install -m 644\|^sysctl -p\|^systemctl start qemu-guest-agent$\|^timedatectl set-timezone')
 check "WSL -> no server-only mutating calls" "0" "$n"
 n=$(count '^apt-get update$')
 check "WSL -> apt still runs" "1" "$n"
