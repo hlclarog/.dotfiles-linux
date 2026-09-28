@@ -481,7 +481,8 @@ second `install` matters because a release can add hooks the old one lacked:
 0.3.19 added a `Notification` hook that 0.3.0 had no concept of. Confirm with:
 
 ```bash
-moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # all four: current
+moshi-hook doctor                                              # 0.4+: Agents, all four: hooks current
+moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # 0.3.x: all four: current
 pgrep -af 'moshi-hook serve'                                   # exactly one process
 ```
 
@@ -749,7 +750,8 @@ ip -4 -o addr show | grep -v ' lo '   # real LAN address, NEVER 172.x
 ss -tln | grep ':22 '                 # sshd listening
 moshi-hook probe                      # running: true, gateway: true
 moshi-hook host list | grep -v revoked
-moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # all four: current
+moshi-hook doctor                                              # 0.4+: Agents, all four: hooks current
+moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # 0.3.x: all four: current
 moshi-hook status | grep 'herdr:'                              # a path, NOT "not found"
 ```
 
@@ -1048,7 +1050,8 @@ not there until `moshi-hook install --target pi` runs.
 yourself, such as a `brew upgrade` that happened to bump herdr:
 
 ```bash
-moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # want: current
+moshi-hook doctor                                              # 0.4+: want hooks current
+moshi-hook status | grep -E '^ +(claude|codex|opencode|pi) '   # 0.3.x: want current
 herdr integration status                                       # want: current (vN)
 ```
 
