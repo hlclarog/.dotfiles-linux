@@ -37,7 +37,7 @@
       "effort": "medium"
     },
     "sdd-apply": {
-      "model": "claude-bridge/claude-fable-5-1",
+      "model": "claude-bridge/claude-opus-5-5",
       "effort": "max"
     },
     "sdd-verify": {
