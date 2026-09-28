@@ -75,6 +75,13 @@ service)
 	[ "${2:-}" = install ] &&
 		printf '[Service]\nEnvironment=PATH=/usr/local/bin:/usr/bin:/bin\n' \
 			> "$XDG_CONFIG_HOME/systemd/user/moshi-hook.service" ;;
+doctor)
+	# Real 0.3.19 rejects the flag 0.4.x introduced for `doctor --json`;
+	# modeling that here is what makes the "repairs pi..." / "leaves a fully
+	# converged machine alone" checks above double as the 0.3-style fallback
+	# regression test for 12-agent-integrations.sh's detection.
+	echo "unknown flag: --json" >&2
+	exit 1 ;;
 install)
 	if [ "${2:-}" = "--target" ]; then sed -i "s/^$3=stale$/$3=current/" "$S"
 	else sed -i 's/=stale$/=current/' "$S"; fi ;;
@@ -186,6 +193,133 @@ chmod +x "$SANDBOX/stub/moshi-hook-notfound"
 	. "$SCRIPT_12"
 ) >/dev/null 2>&1
 check "leaves a 'not found' agent alone when everything else is current" "" "$(cat "$SANDBOX/moshi-notfound-install.log")"
+
+# The two checks above ("repairs pi..." / "leaves a fully converged machine
+# alone") already exercise the 0.3-style fallback end to end, because the
+# main moshi-hook stub now rejects `doctor --json` the same way the real
+# 0.3.19 binary does. This just confirms the stub models that rejection.
+doctor_reject_out=$("$SANDBOX/stub/moshi-hook" doctor --json 2>&1)
+doctor_reject_status=$?
+check "0.3-style stub rejects --json like the real 0.3.19 binary" "1" "$doctor_reject_status"
+contains "0.3-style stub rejects --json like the real 0.3.19 binary" "unknown flag: --json" "$doctor_reject_out"
+
+# moshi-hook 0.4.6 dropped the per-agent lines from `moshi-hook status`, so the
+# fix reads `moshi-hook doctor --json` instead when it is available. These
+# stubs model that real 0.4.6 output (see task description for the measured
+# JSON) so the fallback above and the new JSON path are both covered.
+mkdir -p "$SANDBOX/stub04-fix"
+cat > "$SANDBOX/stub04-fix/moshi-hook" <<'STUB'
+#!/usr/bin/env bash
+FLAG="$SANDBOX/moshi04-fix-installed"
+case "$1" in
+doctor)
+	if [ "${2:-}" = "--json" ]; then
+		if [ -f "$FLAG" ]; then
+			cat <<'JSON'
+{"checks":[{"group":"Agents","subject":"claude","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"codex","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"opencode","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"pi","status":"ok","detail":"hooks current"}]}
+JSON
+		else
+			cat <<'JSON'
+{"checks":[{"group":"Agents","subject":"claude","status":"fail","detail":"hooks out of date","fix":2},{"group":"Agents","subject":"codex","status":"fail","detail":"hooks out of date","fix":3},{"group":"Agents","subject":"opencode","status":"fail","detail":"hooks out of date","fix":4},{"group":"Agents","subject":"pi","status":"fail","detail":"hooks out of date","fix":5}]}
+JSON
+		fi
+	fi ;;
+install) touch "$FLAG" ;;
+esac
+STUB
+chmod +x "$SANDBOX/stub04-fix/moshi-hook"
+rm -f "$SANDBOX/moshi04-fix-installed"
+out_04fix=$(
+	PATH="$SANDBOX/stub04-fix:$PATH"
+	export PATH
+	. "$SCRIPT_12"
+) 2>&1
+contains "0.4-style: installs when doctor --json reports hooks out of date" "moshi-hook hooks installed" "$out_04fix"
+case "$out_04fix" in
+*WARNING*) fail "0.4-style: no WARNING once install fixes the hooks" "no WARNING" "$out_04fix" ;;
+*) pass "0.4-style: no WARNING once install fixes the hooks" ;;
+esac
+
+# The codex background-server check is a real 0.4.6 "Agents" group failure
+# that has nothing to do with hooks; it must never trigger an install.
+mkdir -p "$SANDBOX/stub04-bg"
+cat > "$SANDBOX/stub04-bg/moshi-hook" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+doctor)
+	[ "${2:-}" = "--json" ] && cat <<'JSON'
+{"checks":[{"group":"Agents","subject":"claude","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"codex","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"opencode","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"pi","status":"ok","detail":"hooks current"},{"group":"Agents","subject":"codex","status":"fail","detail":"Codex's shared background server is on (daemon_auto_start is on), so every Codex session looks like one terminal","fix":6}]}
+JSON
+	;;
+install) echo installed >> "$SANDBOX/moshi04-bg-install.log" ;;
+esac
+STUB
+chmod +x "$SANDBOX/stub04-bg/moshi-hook"
+: > "$SANDBOX/moshi04-bg-install.log"
+out_04bg=$(
+	PATH="$SANDBOX/stub04-bg:$PATH"
+	export PATH
+	. "$SCRIPT_12"
+) 2>&1
+check "0.4-style: ignores the non-hook codex background-server check" "" "$(cat "$SANDBOX/moshi04-bg-install.log")"
+contains "0.4-style: reports hooks current when only a non-hook check fails" "moshi-hook hooks are current" "$out_04bg"
+
+# When install does not actually fix the hooks, the fix re-checks once and
+# warns -- but the script itself must still return success.
+mkdir -p "$SANDBOX/stub04-stuck"
+cat > "$SANDBOX/stub04-stuck/moshi-hook" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+doctor)
+	[ "${2:-}" = "--json" ] && cat <<'JSON'
+{"checks":[{"group":"Agents","subject":"claude","status":"fail","detail":"hooks out of date","fix":2},{"group":"Agents","subject":"codex","status":"fail","detail":"hooks out of date","fix":3},{"group":"Agents","subject":"opencode","status":"fail","detail":"hooks out of date","fix":4},{"group":"Agents","subject":"pi","status":"fail","detail":"hooks out of date","fix":5}]}
+JSON
+	;;
+install) : ;;
+esac
+STUB
+chmod +x "$SANDBOX/stub04-stuck/moshi-hook"
+out_04stuck=$(
+	PATH="$SANDBOX/stub04-stuck:$PATH"
+	export PATH
+	. "$SCRIPT_12"
+) 2>&1
+status_04stuck=$?
+check "0.4-style: still returns success when install did not fix the hooks" "0" "$status_04stuck"
+contains "0.4-style: warns when install does not fix the hooks" "WARNING: moshi-hook hooks still not current" "$out_04stuck"
+
+# Non-JSON `doctor --json` output (an older 0.4.x build, a broken pipe, a
+# proxy mangling the response) must fall back to status parsing instead of
+# silently treating garbage as "nothing to install".
+mkdir -p "$SANDBOX/stub-garbage"
+cat > "$SANDBOX/stub-garbage/moshi-hook" <<'STUB'
+#!/usr/bin/env bash
+S="$SANDBOX/state"
+case "$1" in
+doctor)
+	echo "not json at all" ;;
+status)
+	for a in claude codex opencode pi; do
+		if grep -q "^$a=stale$" "$S" 2>/dev/null; then
+			printf '  %-8s stale    missing: extension\n' "$a"
+		else
+			printf '  %-8s current  /fake/%s\n' "$a" "$a"
+		fi
+	done ;;
+install)
+	echo installed >> "$SANDBOX/moshi-garbage-install.log"
+	sed -i 's/=stale$/=current/' "$S" ;;
+esac
+STUB
+chmod +x "$SANDBOX/stub-garbage/moshi-hook"
+state stale current
+(
+	PATH="$SANDBOX/stub-garbage:$PATH"
+	export PATH
+	. "$SCRIPT_12"
+) >/dev/null 2>&1
+check "invalid JSON from doctor --json falls back to status parsing" "current" "$(get claude)"
+contains "invalid JSON from doctor --json falls back to status parsing" "installed" "$(cat "$SANDBOX/moshi-garbage-install.log")"
 
 # --- 2. ordering --------------------------------------------------------------
 # herdr first, moshi last. If that order ever inverts, every agent herdr touches

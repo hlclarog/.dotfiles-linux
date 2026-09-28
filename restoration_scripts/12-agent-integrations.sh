@@ -117,23 +117,59 @@ done
 # (the agent itself is not installed here, so there is no hook to install)
 # gets the same repair. Do not reorder these two blocks.
 if command -v moshi-hook >/dev/null 2>&1; then
-	if moshi-hook status 2>/dev/null |
-		grep -E '^\s+(claude|codex|opencode|pi)\s+' |
-		grep -vE '\s(current|not found)(\s|$)' | grep -q .; then
+	# Measured on a fresh WSL restore against moshi-hook 0.4.6: `moshi-hook
+	# status` no longer prints the per-agent lines the check below parses (it
+	# now just points at `moshi-hook doctor`), so on 0.4.x the guard never saw
+	# a stale/missing agent and the hooks were never installed. 0.4.x adds
+	# `doctor --json`; 0.3.19 rejects that flag, which is what tells this
+	# apart from the old format without a version check.
+	moshi_hooks_need_install() {
+		local moshi_doctor_json moshi_doctor_status
+		moshi_doctor_json=$(moshi-hook doctor --json 2>/dev/null)
+		moshi_doctor_status=$?
+		if [ "$moshi_doctor_status" -eq 0 ] && [ -n "$moshi_doctor_json" ] &&
+			command -v jq >/dev/null 2>&1 &&
+			printf '%s' "$moshi_doctor_json" | jq -e . >/dev/null 2>&1; then
+			# Only an "Agents" check for one of the four targets whose detail
+			# actually mentions hooks counts -- 0.4.6 also reports unrelated
+			# per-agent failures (e.g. codex's shared background-server
+			# warning) that install can't fix and must not trigger a reinstall.
+			printf '%s' "$moshi_doctor_json" | jq -e '
+				[.checks[]? |
+					select(.group == "Agents") |
+					select(.subject == "claude" or .subject == "codex" or .subject == "opencode" or .subject == "pi") |
+					select(.status != "ok") |
+					select(.detail | test("hook"; "i"))
+				] | length > 0
+			' >/dev/null 2>&1
+		else
+			moshi-hook status 2>/dev/null |
+				grep -E '^\s+(claude|codex|opencode|pi)\s+' |
+				grep -vE '\s(current|not found)(\s|$)' | grep -q .
+		fi
+	}
+
+	if moshi_hooks_need_install; then
 		moshi-hook install >/dev/null 2>&1 &&
 			echo " > moshi-hook hooks installed/reinstalled after the herdr integrations"
 		# The daemon reads the hook config at startup and does not notice a
 		# rewrite, so without this the repair does not take effect.
 		systemctl --user restart moshi-hook.service >/dev/null 2>&1 &&
 			echo " > moshi-hook daemon restarted"
+		# `moshi-hook install` can fail silently against a broken daemon; check
+		# once more so a fresh machine doesn't look fixed when it is not.
+		moshi_hooks_need_install &&
+			echo " > WARNING: moshi-hook hooks still not current; run: moshi-hook doctor"
 	else
 		echo " > moshi-hook hooks are current"
 	fi
+	unset -f moshi_hooks_need_install
 fi
 
 cat <<'MSG'
  > After ANY agent-tool install or upgrade, re-check both. Neither warns you:
-     moshi-hook status | grep -E 'claude|codex|opencode|pi'
+     moshi-hook doctor        # 0.4+: the Agents section, all four: hooks current
+     moshi-hook status | grep -E 'claude|codex|opencode|pi'   # 0.3.x
      herdr integration status
 MSG
 
