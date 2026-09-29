@@ -99,10 +99,20 @@ step_power() {
 		report ok "power settings already correct"
 	fi
 
-	restartfreeze=$(systemsetup -getrestartfreeze 2>/dev/null)
+	# systemsetup refuses to even read this setting without admin rights.
+	# --check never calls sudo, so it reports the value as unknown instead of
+	# a false pending; apply mode reads it through sudo.
+	if [ "$CHECK_ONLY" -eq 1 ]; then
+		restartfreeze=$(systemsetup -getrestartfreeze 2>&1)
+	else
+		restartfreeze=$(sudo systemsetup -getrestartfreeze 2>&1)
+	fi
 	case "$restartfreeze" in
 	*On*)
 		report ok "restart after freeze already on"
+		;;
+	*"administrator access"*)
+		echo "restart after freeze: unknown without sudo (check: sudo systemsetup -getrestartfreeze)"
 		;;
 	*)
 		if [ "$CHECK_ONLY" -eq 1 ]; then
