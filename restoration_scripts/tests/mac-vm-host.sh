@@ -64,7 +64,7 @@ chmod +x "$STUBBIN/uname"
 cat >"$STUBBIN/sudo" <<'STUB'
 #!/usr/bin/env bash
 echo "sudo $*" >>"$SUDO_LOG"
-"$@"
+VIA_SUDO=1 "$@"
 STUB
 chmod +x "$STUBBIN/sudo"
 
@@ -81,6 +81,11 @@ chmod +x "$STUBBIN/pmset"
 cat >"$STUBBIN/systemsetup" <<'STUB'
 #!/usr/bin/env bash
 echo "systemsetup $*" >>"$SYSTEMSETUP_LOG"
+# Real systemsetup refuses to even read settings without admin rights.
+if [ "${SYSTEMSETUP_NEEDS_ADMIN:-0}" = 1 ] && [ "${VIA_SUDO:-0}" != 1 ]; then
+	echo "You need administrator access to run this tool... exiting!"
+	exit 1
+fi
 if [ "$1" = "-getrestartfreeze" ]; then
 	echo "Restart After Freeze: ${SYSTEMSETUP_RESTARTFREEZE:-On}"
 fi
@@ -368,7 +373,7 @@ run_setup() {
 		UTM_APP_DIR="$UTM_APP_DIR"
 		UTMCTL="$UTM_APP_DIR/Contents/MacOS/utmctl"
 		export HOME PATH UTM_APP_DIR UTMCTL \
-			SUDO_LOG PMSET_LOG PMSET_G_OUTPUT SYSTEMSETUP_LOG SYSTEMSETUP_RESTARTFREEZE \
+			SUDO_LOG PMSET_LOG PMSET_G_OUTPUT SYSTEMSETUP_LOG SYSTEMSETUP_RESTARTFREEZE SYSTEMSETUP_NEEDS_ADMIN \
 			DEFAULTS_LOG DEFAULTS_AUTOLOGIN_USER FDESETUP_LOG FDESETUP_STATUS \
 			LAUNCHCTL_LOG UTMCTL_LOG UTMCTL_LIST_OUTPUT UNAME_S STAT_OWNER
 		bash "$SETUP" "$@"
@@ -526,6 +531,31 @@ freeze_calls=$(grep -c '^sudo systemsetup -setrestartfreeze on' "$SUDO_LOG" || t
 check "restartfreeze Off -> applied exactly once" "1" "$freeze_calls"
 SYSTEMSETUP_RESTARTFREEZE=On
 export SYSTEMSETUP_RESTARTFREEZE
+
+# Measured on the office iMac: without admin rights systemsetup cannot read the
+# setting, so --check reported a false pending although it was On.
+SYSTEMSETUP_NEEDS_ADMIN=1
+export SYSTEMSETUP_NEEDS_ADMIN
+SUDO_LOG="$SANDBOX/sudo-freeze-admin-check.log"; : >"$SUDO_LOG"
+UTMCTL_LIST_OUTPUT="other-vm"
+export UTMCTL_LIST_OUTPUT
+status=$(run_setup "$SETUP_HOME" --vm other-vm --check)
+out=$(cat "$SANDBOX/setup-out")
+check "--check, systemsetup needs admin -> exit 0" "0" "$status"
+contains "--check, systemsetup needs admin -> reports unknown" "restart after freeze: unknown without sudo" "$out"
+not_contains "--check, systemsetup needs admin -> no pending line" "pending" "$out"
+check "--check, systemsetup needs admin -> still no sudo calls" "0" "$(wc -l <"$SUDO_LOG" | tr -d ' ')"
+UTMCTL_LIST_OUTPUT="sandbox-imac-hclaro-vm"
+export UTMCTL_LIST_OUTPUT
+
+# Apply mode reads it through sudo, so an On setting is not rewritten.
+SUDO_LOG="$SANDBOX/sudo-freeze-admin-apply.log"; : >"$SUDO_LOG"
+status=$(run_setup "$SANDBOX/setup-home-freezeadmin" --vm sandbox-imac-hclaro-vm)
+check "apply, systemsetup needs admin -> exit 0" "0" "$status"
+check "apply, systemsetup needs admin -> reads via sudo" "1" "$(grep -c '^sudo systemsetup -getrestartfreeze' "$SUDO_LOG" || true)"
+check "apply, systemsetup needs admin -> On is not rewritten" "0" "$(grep -c '^sudo systemsetup -setrestartfreeze' "$SUDO_LOG" || true)"
+SYSTEMSETUP_NEEDS_ADMIN=0
+export SYSTEMSETUP_NEEDS_ADMIN
 
 # autologin missing -> manual steps printed, FileVault status reported
 DEFAULTS_AUTOLOGIN_USER=""
