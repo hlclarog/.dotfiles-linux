@@ -697,8 +697,10 @@ complete the login yourself.
 
 ```bash
 cd "$HOME/.dotfiles"
-./scripts/post-restore-secrets           # interactive, step by step
-./scripts/post-restore-secrets --check   # status only, no prompts; exits 0 once nothing is pending
+./scripts/post-restore-secrets              # interactive, step by step
+./scripts/post-restore-secrets --check      # status only, no prompts; exits 0 once nothing is pending
+./scripts/post-restore-secrets --menu       # interactive: numbered table, pick a step or switch its account
+./scripts/post-restore-secrets --no-accounts # skip the account-detection probes (faster status/menu)
 ```
 
 Run a single step with `POST_RESTORE_ONLY=<step-id>`, for example
@@ -722,6 +724,35 @@ Run a single step with `POST_RESTORE_ONLY=<step-id>`, for example
 Every command it runs is either a status check or executed in the foreground
 with your input -- nothing here logs in or applies sudo-gated changes on its
 own.
+
+### Accounts: which login each step is using
+
+Anyone splitting personal and work machines quickly ends up with several
+accounts across `gh`, SSH, Claude, Codex, Pi, opencode and Engram cloud. The
+default table (and `--check`) add an ACCOUNT column showing what each step is
+currently logged in as -- an email, a GitHub login, a tailnet login name, or
+`-` when it cannot be read (or does not apply, like `zerotier`/`sshd`).
+Detection is read-only: it never logs in, never prints a token, and every
+probe fails safely to `-` instead of hanging. Pass `--no-accounts` to skip it
+entirely when you only need the STATUS column.
+
+`--menu` turns the table into a numbered prompt: pick a pending step to run
+its normal flow, or pick one already configured to see `<label> is
+configured as <account>. Reconfigure / switch account?` and, on yes, log out
+and back in for that service. Two things to know before relying on it:
+
+- **GitHub and Bitbucket allow only one signed-in account per machine.**
+  Running personal and work repositories from the same machine means one SSH
+  key per host, so label each key (`personal`, `work`, ...) when `--menu`
+  asks -- that label is what makes the ACCOUNT column able to tell your keys
+  apart afterward. Replacing a key moves the old one into `~/.ssh/retired/`
+  with a timestamp suffix; it is never deleted.
+- **Tailscale is never switched from `--menu`.** Logging out of a tailnet
+  drops every Tailscale connection immediately, including an SSH session
+  running over Tailscale itself -- there is no safe way to do that from
+  inside such a session. The menu only prints the two commands
+  (`sudo tailscale logout` then `sudo tailscale up`) to run from the
+  machine's console or a LAN session instead.
 
 ---
 

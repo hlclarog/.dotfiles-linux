@@ -84,10 +84,18 @@ continue with the logins.
 ## After the restore: logins and keys
 
 ```bash
-~/.dotfiles/scripts/post-restore-secrets            # guided: checks each step, offers to run it
-~/.dotfiles/scripts/post-restore-secrets --check    # status table only; exits 1 while something is pending
+~/.dotfiles/scripts/post-restore-secrets              # guided: checks each step, offers to run it
+~/.dotfiles/scripts/post-restore-secrets --check      # status table only; exits 1 while something is pending
+~/.dotfiles/scripts/post-restore-secrets --menu       # interactive: pick a step, or switch its account
+~/.dotfiles/scripts/post-restore-secrets --no-accounts # skip the account probes (faster, no ACCOUNT column)
 POST_RESTORE_ONLY=claude ~/.dotfiles/scripts/post-restore-secrets   # one step
 ```
+
+Every mode shows an ACCOUNT column: which GitHub user, email or account each
+step is currently logged in as, so having a personal and a work machine (or
+account) never leaves you guessing which one is active. `--menu` adds a
+numbered prompt to run a pending step or, for one already configured, offer
+to switch its account.
 
 | Step | What you do |
 |---|---|
@@ -103,6 +111,14 @@ POST_RESTORE_ONLY=claude ~/.dotfiles/scripts/post-restore-secrets   # one step
 | `sshd` | Keys-only SSH. Keep a second session open until a new login still works |
 | `shell` | Sets the login shell to Homebrew's zsh if it is not yet |
 | `moshi` | Optional: pairing commands for the Moshi phone app |
+
+GitHub and Bitbucket only allow one account signed in per machine at a time,
+so keep one SSH key per host and label each with its account (`personal`,
+`work`) when `--menu` asks for a label -- that label is how the ACCOUNT
+column tells your keys apart later. `--menu` never logs Tailscale out by
+itself: switching tailnets drops every Tailscale connection, including an
+SSH session running over one, so that switch has to happen from the
+machine's console or a LAN session instead.
 
 For Moshi terminal access from outside the office, register the host with its
 Tailscale name, never a LAN IP:
