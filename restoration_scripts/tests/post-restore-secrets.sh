@@ -58,7 +58,12 @@ mkdir -p "$SANDBOX/stub"
 cat >"$SANDBOX/stub/gh" <<'STUB'
 #!/usr/bin/env bash
 echo "gh $*" >>"$LOG_DIR/gh.log"
-if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then exit "${GH_STATUS:-1}"; fi
+if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
+	if [ -n "${GH_ACCOUNT_NAME:-}" ]; then
+		echo "✓ Logged in to github.com account ${GH_ACCOUNT_NAME} (keyring)"
+	fi
+	exit "${GH_STATUS:-1}"
+fi
 exit 0
 STUB
 
@@ -74,7 +79,11 @@ cat >"$SANDBOX/stub/claude" <<'STUB'
 echo "claude $*" >>"$LOG_DIR/claude.log"
 if [ "${1:-}" = auth ] && [ "${2:-}" = status ]; then
 	if [ "${CLAUDE_LOGGED_IN:-0}" = 1 ]; then
-		echo '{ "loggedIn": true }'
+		if [ -n "${CLAUDE_ORG:-}" ]; then
+			printf '{ "loggedIn": true, "email": "%s", "orgName": "%s" }\n' "${CLAUDE_EMAIL:-}" "${CLAUDE_ORG:-}"
+		else
+			printf '{ "loggedIn": true, "email": "%s" }\n' "${CLAUDE_EMAIL:-}"
+		fi
 	else
 		echo '{ "loggedIn": false }'
 	fi
@@ -106,7 +115,17 @@ STUB
 cat >"$SANDBOX/stub/tailscale" <<'STUB'
 #!/usr/bin/env bash
 echo "tailscale $*" >>"$LOG_DIR/tailscale.log"
-if [ "${1:-}" = status ]; then exit "${TAILSCALE_STATUS:-1}"; fi
+if [ "${1:-}" = status ]; then
+	if printf '%s\n' "$*" | grep -q -- '--json'; then
+		if [ -n "${TAILSCALE_LOGIN_NAME:-}" ]; then
+			printf '{"Self":{"UserID":123},"User":{"123":{"LoginName":"%s"}}}\n' "${TAILSCALE_LOGIN_NAME}"
+		else
+			echo '{}'
+		fi
+		exit 0
+	fi
+	exit "${TAILSCALE_STATUS:-1}"
+fi
 exit 0
 STUB
 
@@ -129,10 +148,11 @@ STUB
 cat >"$SANDBOX/stub/ssh" <<'STUB'
 #!/usr/bin/env bash
 echo "ssh $*" >>"$LOG_DIR/ssh.log"
+# Real ssh prints both messages on stderr, not stdout.
 if [ "${SSH_GH_OK:-0}" = 1 ]; then
-	echo "Hi test-user! You've successfully authenticated, but GitHub does not provide shell access."
+	echo "Hi ${SSH_HI_NAME:-test-user}! You've successfully authenticated, but GitHub does not provide shell access." >&2
 else
-	echo "Permission denied (publickey)."
+	echo "Permission denied (publickey)." >&2
 fi
 exit 0
 STUB
@@ -160,7 +180,10 @@ STUB
 cat >"$SANDBOX/stub/moshi-hook" <<'STUB'
 #!/usr/bin/env bash
 echo "moshi-hook $*" >>"$LOG_DIR/moshi-hook.log"
-if [ "${1:-}" = status ]; then printf '%s\n' "${MOSHI_STATUS_LINE:-status: unpaired}"; fi
+if [ "${1:-}" = status ]; then
+	printf '%s\n' "${MOSHI_STATUS_LINE:-status: unpaired}"
+	[ -n "${MOSHI_DISPLAY_NAME:-}" ] && printf 'display name: %s\n' "${MOSHI_DISPLAY_NAME}"
+fi
 exit 0
 STUB
 
@@ -225,6 +248,8 @@ reset_test_env() {
 	export TAILSCALE_STATUS="" SSH_GH_OK="" LOGIN_SHELL="" FAKE_UNAME="" MOSHI_STATUS_LINE=""
 	export ZT_NETWORK_STATUS=""
 	export POST_RESTORE_ONLY="" POST_RESTORE_PROC_VERSION_FILE="" SSHD_DROPIN_DIR=""
+	export GH_ACCOUNT_NAME="" CLAUDE_EMAIL="" CLAUDE_ORG="" SSH_HI_NAME=""
+	export TAILSCALE_LOGIN_NAME="" MOSHI_DISPLAY_NAME="" NO_ACCOUNTS=""
 	TEST_HOME=$(mktemp -d)
 	LOG_DIR=$(mktemp -d)
 	export LOG_DIR
@@ -251,6 +276,16 @@ run_secrets() {
 }
 
 log_of() { cat "$LOG_DIR/$1.log" 2>/dev/null; }
+
+# Builds a syntactically valid but unsigned JWT (header.payload.SIGNATURE) from
+# a JSON payload, purely so account-detection probes have something real to
+# base64url-decode. Never a genuine credential.
+make_jwt() {
+	local payload_json="$1" header='{"alg":"none","typ":"JWT"}' h p
+	h=$(printf '%s' "$header" | base64 | tr -d '\n=' | tr '+/' '-_')
+	p=$(printf '%s' "$payload_json" | base64 | tr -d '\n=' | tr '+/' '-_')
+	printf '%s.%s.FAKESIGNATURE' "$h" "$p"
+}
 
 # ==============================================================================
 # --check: everything done -> every row is ✓, exit 0
@@ -297,7 +332,7 @@ check "everything-done: zerotier-cli was never even probed" "" "$(log_of zerotie
 rm -f "$TEST_HOME/.engram/cloud.json"
 ENGRAM_READY=0
 run_secrets "" --check
-contains "engram-cloud unconfigured shows optional" "engram-cloud  optional (not configured)" "$OUTPUT"
+contains "engram-cloud unconfigured shows optional" "engram-cloud      optional (not configured)" "$OUTPUT"
 check "engram-cloud unconfigured does not fail --check" "0" "$RC"
 ENGRAM_READY=1
 
@@ -329,14 +364,14 @@ run_secrets "" --check
 check "everything-pending exit code is 1" "1" "$RC"
 pending_count=$(printf '%s' "$OUTPUT" | grep -c 'pending')
 check "everything-pending: the 10 non-optional-cloud steps mention pending" "10" "$pending_count"
-contains "everything-pending: engram-cloud is optional, not pending" "engram-cloud  optional (not configured)" "$OUTPUT"
+contains "everything-pending: engram-cloud is optional, not pending" "engram-cloud      optional (not configured)" "$OUTPUT"
 check "no gh login was attempted" "" "$(log_of gh | grep -v 'auth status' || true)"
 check "no ssh-keygen ran" "" "$(log_of ssh-keygen)"
 check "no pi launch ran" "" "$(log_of pi)"
 check "no claude login was attempted" "" "$(log_of claude | grep -v 'auth status' || true)"
 check "no codex login was attempted" "" "$(log_of codex | grep -v 'login status' || true)"
 check "no opencode login was attempted" "" "$(log_of opencode)"
-check "no tailscale up was attempted" "" "$(log_of tailscale | grep -v '^tailscale status$' || true)"
+check "no tailscale up was attempted" "" "$(log_of tailscale | grep -vE '^tailscale status( --json)?$' || true)"
 check "sudo was never called" "" "$(log_of sudo)"
 check "systemctl was never called" "" "$(log_of systemctl)"
 check "moshi-hook pairing was never run" "" "$(log_of moshi-hook | grep -vE '^moshi-hook status$' || true)"
@@ -379,10 +414,13 @@ Host example.org
   User git
   IdentityFile ~/.ssh/id_example
 CONF
-# 3 prompts in order: generate(github), add-to-gh(github), generate(example.org)
+# 4 prompts in order: generate(github), add-to-gh(github), generate(example.org),
+# label for the example.org key (Enter = none, keeping the plain user@host
+# comment so the exact-args assertions below stay unchanged).
 run_secrets "y
 y
 y
+
 "
 expected_user="$(id -un)"
 contains "keygen ran for the github.com key with the exact args" \
@@ -396,6 +434,108 @@ contains "gh ssh-key add ran for the github.com key" \
 	"$(log_of gh)"
 not_contains "gh ssh-key add did NOT run for the non-github host" \
 	"id_example" "$(log_of gh)"
+
+echo
+# ==============================================================================
+# ssh-keys: the summary/menu tables show one row per (host, IdentityFile) pair,
+# never a single aggregate "ssh-keys" row.
+# ==============================================================================
+echo "ssh-keys: table shows one row per key, not one aggregate row"
+reset_test_env
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/github-hlclarog
+  IdentitiesOnly yes
+
+Host bitbucket.org
+  HostName bitbucket.org
+  User git
+  IdentityFile ~/.ssh/bit-hclaro
+  IdentitiesOnly yes
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+run_secrets "" --check
+not_contains "no row is literally named ssh-keys" "ssh-keys" "$OUTPUT"
+gh_row=$(printf '%s\n' "$OUTPUT" | grep -E '^ssh:github\.com[[:space:]]')
+contains "github.com row shows done" "✓" "$gh_row"
+contains "github.com row account is the Hi-name, without a github: prefix" "testuser" "$gh_row"
+not_contains "github.com row account has no github: prefix" "github:" "$gh_row"
+bb_row=$(printf '%s\n' "$OUTPUT" | grep -E '^ssh:bitbucket\.org[[:space:]]')
+contains "bitbucket.org row shows pending (key missing)" "pending" "$bb_row"
+contains "bitbucket.org row account is a dash while the key is missing" "-" "$bb_row"
+
+echo "ssh-keys: a non-github row's account comes from the .pub comment label"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE user@host personal" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+run_secrets "" --check
+bb_row=$(printf '%s\n' "$OUTPUT" | grep -E '^ssh:bitbucket\.org[[:space:]]')
+contains "bitbucket.org row account is the pub comment label" "personal" "$bb_row"
+
+echo
+# ==============================================================================
+# --check: the exit code depends on the per-key ssh rows, not an aggregate.
+# Scoped with POST_RESTORE_ONLY=ssh-keys so only the ssh rows affect $RC here.
+# ==============================================================================
+echo "--check: exit 1 when only the bitbucket row is pending"
+reset_test_env
+POST_RESTORE_ONLY=ssh-keys
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+SSH_GH_OK=1
+run_secrets "" --check
+check "exit code is 1 with the bitbucket key missing" "1" "$RC"
+
+echo "--check: exit 0 once both keys exist"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+run_secrets "" --check
+check "exit code is 0 with both keys present" "0" "$RC"
+
+echo
+# ==============================================================================
+# POST_RESTORE_ONLY=ssh:<host> processes only that one key.
+# ==============================================================================
+echo "POST_RESTORE_ONLY=ssh:bitbucket.org processes only the bitbucket key"
+reset_test_env
+POST_RESTORE_ONLY=ssh:bitbucket.org
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+run_secrets "y
+personal
+"
+keygen_log=$(log_of ssh-keygen)
+bit_calls=$(printf '%s\n' "$keygen_log" | grep -c -- "-f $TEST_HOME/.ssh/bit-hclaro " || true)
+check "exactly one ssh-keygen call for the bitbucket key" "1" "$bit_calls"
+not_contains "no ssh-keygen call touched the github key" "github-hlclarog" "$keygen_log"
+contains "the keygen comment ends with the entered label" "-C $(id -un)@testhost personal" "$keygen_log"
+contains "the new bitbucket public key is printed" "ssh-ed25519 FAKEFAKEFAKE stub" "$OUTPUT"
+check "gh was never touched (not a github host)" "" "$(log_of gh)"
 
 echo
 # ==============================================================================
@@ -679,6 +819,462 @@ run_secrets "n
 "
 check "gh login was never run" "" "$(log_of gh | grep -v 'auth status' || true)"
 contains "the final summary still lists gh as pending" "pending" "$OUTPUT"
+
+echo
+# ==============================================================================
+# table: ACCOUNT column is populated by default and --no-accounts skips every
+# account probe (fast mode), while leaving --check's exit-code semantics and
+# status probes untouched.
+# ==============================================================================
+echo "table: ACCOUNT column and --no-accounts fast mode"
+reset_test_env
+POST_RESTORE_ONLY=tailscale
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+TAILSCALE_STATUS=0
+TAILSCALE_LOGIN_NAME="account.probe@example.test"
+run_secrets "" --check
+account_probe_calls=$(log_of tailscale | grep -c -- '--json' || true)
+check "the account probe (tailscale status --json) ran once by default" "1" "$account_probe_calls"
+contains "the ACCOUNT column shows the detected login name" "account.probe@example.test" "$OUTPUT"
+
+reset_test_env
+POST_RESTORE_ONLY=tailscale
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+TAILSCALE_STATUS=0
+TAILSCALE_LOGIN_NAME="account.probe@example.test"
+run_secrets "" --check --no-accounts
+account_probe_calls=$(log_of tailscale | grep -c -- '--json' || true)
+check "--no-accounts skips the account probe entirely" "0" "$account_probe_calls"
+not_contains "--no-accounts never shows a detected account" "account.probe@example.test" "$OUTPUT"
+contains "--no-accounts shows a dash instead" "tailscale" "$OUTPUT"
+
+reset_test_env
+GH_STATUS=0
+CODEX_STATUS=0
+CLAUDE_LOGGED_IN=1
+ENGRAM_READY=1
+TAILSCALE_STATUS=0
+SSH_GH_OK=1
+LOGIN_SHELL=/usr/bin/zsh
+MOSHI_STATUS_LINE="status: paired"
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+mkdir -p "$TEST_HOME/.pi/agent" "$TEST_HOME/.local/share/opencode" "$TEST_HOME/.engram" "$TEST_HOME/.ssh"
+echo '{"openai-codex": {}}' >"$TEST_HOME/.pi/agent/auth.json"
+echo '{"anthropic": "x"}' >"$TEST_HOME/.local/share/opencode/auth.json"
+echo '{}' >"$TEST_HOME/.engram/cloud.json"
+echo '{"mcpServers": {"codegraph": {}}}' >"$TEST_HOME/.claude.json"
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/id_github
+CONF
+: >"$TEST_HOME/.ssh/id_github"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/id_github.pub"
+SSHD_DROPIN_DIR="$TEST_HOME/sshd-dropin"
+mkdir -p "$SSHD_DROPIN_DIR"
+cp "$FIXTURE_DOTFILES/os/linux/ssh/00-moshi.conf" "$SSHD_DROPIN_DIR/00-moshi.conf"
+export SSHD_DROPIN_DIR
+echo "some-key" >"$TEST_HOME/.ssh/authorized_keys"
+run_secrets "" --check --no-accounts
+check "--no-accounts keeps --check's exit-code semantics (all done -> 0)" "0" "$RC"
+
+echo
+# ==============================================================================
+# accounts: per-service detection from fixtures (gh, ssh-keys, claude, codex,
+# pi, opencode, engram-cloud, tailscale, moshi, shell); zerotier and sshd are
+# always "-".
+# ==============================================================================
+echo "accounts: per-service detection from fixtures"
+reset_test_env
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+GH_STATUS=0
+GH_ACCOUNT_NAME="octocat"
+CODEX_STATUS=0
+CLAUDE_LOGGED_IN=1
+CLAUDE_EMAIL="claude.user@example.test"
+CLAUDE_ORG="Acme Corp"
+ENGRAM_READY=1
+TAILSCALE_STATUS=0
+TAILSCALE_LOGIN_NAME="ts.user@example.test"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+LOGIN_SHELL=/usr/bin/zsh
+MOSHI_STATUS_LINE="status: paired"
+MOSHI_DISPLAY_NAME="My Phone"
+mkdir -p "$TEST_HOME/.pi/agent" "$TEST_HOME/.local/share/opencode" "$TEST_HOME/.engram" "$TEST_HOME/.ssh" "$TEST_HOME/.codex"
+CODEX_JWT=$(make_jwt '{"email":"codex.user@example.test"}')
+jq -n --arg t "$CODEX_JWT" '{tokens: {id_token: $t}}' >"$TEST_HOME/.codex/auth.json"
+PI_JWT=$(make_jwt '{"https://api.openai.com/profile":{"email":"pi.user@example.test"}}')
+jq -n --arg t "$PI_JWT" '{"openai-codex": {access: $t}}' >"$TEST_HOME/.pi/agent/auth.json"
+jq -n '{"anthropic": "x", "openai": "y"}' >"$TEST_HOME/.local/share/opencode/auth.json"
+jq -n '{server_url: "https://cloud.example.test:1234/api", token: "unused"}' >"$TEST_HOME/.engram/cloud.json"
+echo '{"mcpServers": {"codegraph": {}}}' >"$TEST_HOME/.claude.json"
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/id_github
+CONF
+: >"$TEST_HOME/.ssh/id_github"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/id_github.pub"
+SSHD_DROPIN_DIR="$TEST_HOME/sshd-dropin"
+mkdir -p "$SSHD_DROPIN_DIR"
+cp "$FIXTURE_DOTFILES/os/linux/ssh/00-moshi.conf" "$SSHD_DROPIN_DIR/00-moshi.conf"
+export SSHD_DROPIN_DIR
+echo "some-key" >"$TEST_HOME/.ssh/authorized_keys"
+
+run_secrets "" --check
+contains "gh account is detected" "octocat" "$OUTPUT"
+contains "the ssh:github.com row shows the Hi-name account, without a github: prefix" "testuser" "$OUTPUT"
+not_contains "no row is literally named ssh-keys" "ssh-keys" "$OUTPUT"
+contains "claude account shows email and org" "claude.user@example.test (Acme Corp)" "$OUTPUT"
+contains "codex account shows the JWT email claim" "codex.user@example.test" "$OUTPUT"
+contains "pi account shows the JWT profile email claim" "pi.user@example.test" "$OUTPUT"
+contains "opencode account lists the provider keys" "anthropic, openai" "$OUTPUT"
+contains "engram-cloud account shows only the host" "cloud.example.test" "$OUTPUT"
+not_contains "engram-cloud account never shows the port" "cloud.example.test:1234" "$OUTPUT"
+contains "tailscale account shows the tailnet login name" "ts.user@example.test" "$OUTPUT"
+contains "moshi account shows the display name" "My Phone" "$OUTPUT"
+contains "shell account shows the login shell path" "/usr/bin/zsh" "$OUTPUT"
+zerotier_line=$(printf '%s\n' "$OUTPUT" | grep -E '^zerotier[[:space:]]')
+contains "zerotier account is always -" "-" "$zerotier_line"
+sshd_line=$(printf '%s\n' "$OUTPUT" | grep -E '^sshd[[:space:]]')
+contains "sshd account is always -" "-" "$sshd_line"
+
+echo
+# ==============================================================================
+# security: raw tokens (JWTs, engram token) never appear in any output, only
+# the extracted emails.
+# ==============================================================================
+echo "security: secrets never appear in any output"
+reset_test_env
+SECRET_MARK="SECRET_TOKEN_MUST_NOT_LEAK_9f8a"
+mkdir -p "$TEST_HOME/.codex" "$TEST_HOME/.pi/agent" "$TEST_HOME/.engram"
+CODEX_JWT=$(make_jwt '{"email":"codex.sec@example.test"}')
+jq -n --arg t "$CODEX_JWT" --arg rt "${SECRET_MARK}-codex-refresh" --arg at "${SECRET_MARK}-codex-access" \
+	'{tokens: {id_token: $t, refresh_token: $rt, access_token: $at}}' >"$TEST_HOME/.codex/auth.json"
+PI_JWT=$(make_jwt '{"https://api.openai.com/profile":{"email":"pi.sec@example.test"}}')
+jq -n --arg t "$PI_JWT" --arg at "${SECRET_MARK}-pi-refresh" \
+	'{"openai-codex": {access: $t, refresh: $at}}' >"$TEST_HOME/.pi/agent/auth.json"
+jq -n --arg tok "${SECRET_MARK}-engram" '{server_url: "https://cloud.example.test", token: $tok}' >"$TEST_HOME/.engram/cloud.json"
+ENGRAM_READY=0
+run_secrets "" --check
+not_contains "the raw codex id_token JWT never leaks into output" "$CODEX_JWT" "$OUTPUT"
+not_contains "the raw pi access JWT never leaks into output" "$PI_JWT" "$OUTPUT"
+not_contains "no secret marker leaks into output" "$SECRET_MARK" "$OUTPUT"
+contains "the codex email IS shown" "codex.sec@example.test" "$OUTPUT"
+contains "the pi email IS shown" "pi.sec@example.test" "$OUTPUT"
+
+echo
+# ==============================================================================
+# --menu: navigation basics (quit, EOF, invalid input, scoping)
+# ==============================================================================
+echo "menu: q exits 0 without actions"
+reset_test_env
+POST_RESTORE_ONLY=gh
+GH_STATUS=1
+run_secrets "q
+" --menu
+check "menu q exits 0" "0" "$RC"
+check "no gh login was attempted" "" "$(log_of gh | grep -v 'auth status' || true)"
+
+echo "menu: EOF exits 0"
+reset_test_env
+POST_RESTORE_ONLY=gh
+run_secrets "" --menu
+check "menu EOF exits 0" "0" "$RC"
+
+echo "menu: invalid choice then q"
+reset_test_env
+POST_RESTORE_ONLY=gh
+run_secrets "zz
+q
+" --menu
+contains "menu reports an invalid choice" "Invalid" "$OUTPUT"
+check "menu exits 0 after q" "0" "$RC"
+
+echo "menu: POST_RESTORE_ONLY restricts the menu to one step"
+reset_test_env
+POST_RESTORE_ONLY=gh
+GH_STATUS=1
+run_secrets "q
+" --menu
+not_contains "menu does not list unrelated steps" "ssh-keys" "$OUTPUT"
+contains "menu lists the gh step" "gh" "$OUTPUT"
+
+echo
+# ==============================================================================
+# --menu: running a pending step, and declining to reconfigure a done step
+# ==============================================================================
+echo "menu: choosing a pending step runs its flow"
+reset_test_env
+POST_RESTORE_ONLY=gh
+GH_STATUS=1
+run_secrets "1
+y
+q
+" --menu
+contains "gh login command ran from the menu" \
+	"gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key --scopes admin:public_key" \
+	"$(log_of gh)"
+
+echo "menu: choosing a done step then N does nothing"
+reset_test_env
+POST_RESTORE_ONLY=gh
+GH_STATUS=0
+GH_ACCOUNT_NAME=octocat
+run_secrets "1
+n
+q
+" --menu
+contains "menu shows the configured account before asking" "octocat" "$OUTPUT"
+check "no gh auth logout ran" "" "$(log_of gh | grep -v 'auth status' || true)"
+
+echo
+# ==============================================================================
+# --menu: switching accounts for claude and codex logs out, then logs back in
+# ==============================================================================
+echo "menu: + y on claude runs logout then login"
+reset_test_env
+POST_RESTORE_ONLY=claude
+CLAUDE_LOGGED_IN=1
+CLAUDE_EMAIL="claude.user@example.test"
+run_secrets "1
+y
+q
+" --menu
+claude_log=$(log_of claude)
+contains "claude logout ran" "claude auth logout" "$claude_log"
+contains "claude login ran" "claude auth login" "$claude_log"
+logout_line=$(printf '%s\n' "$claude_log" | grep -n 'auth logout' | head -1 | cut -d: -f1)
+login_line=$(printf '%s\n' "$claude_log" | grep -n 'auth login' | tail -1 | cut -d: -f1)
+check "logout ran before the fresh login" "yes" "$([ "${logout_line:-0}" -lt "${login_line:-0}" ] && echo yes || echo no)"
+
+echo "menu: + y on codex runs logout then login --device-auth"
+reset_test_env
+POST_RESTORE_ONLY=codex
+CODEX_STATUS=0
+run_secrets "1
+y
+q
+" --menu
+codex_log=$(log_of codex)
+contains "codex logout ran" "codex logout" "$codex_log"
+contains "codex device-auth login ran" "codex login --device-auth" "$codex_log"
+
+echo
+# ==============================================================================
+# --menu: ssh-keys replace moves the old key into retired/ (never deletes),
+# regenerates it with a label in the comment, and follows the right per-host
+# path (gh ssh-key add for github.com, printed instructions otherwise).
+# ==============================================================================
+echo "menu: ssh-keys replace - github.com regenerates and uploads via gh"
+reset_test_env
+POST_RESTORE_ONLY=ssh-keys
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+GH_STATUS=0
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/id_github
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+echo "ORIGINAL-PRIVATE-KEY-MARKER" >"$TEST_HOME/.ssh/id_github"
+echo "ssh-ed25519 OLDKEYDATA $(id -un)@testhost" >"$TEST_HOME/.ssh/id_github.pub"
+run_secrets "1
+y
+label-x
+q
+" --menu
+retired_priv=$(find "$TEST_HOME/.ssh/retired" -maxdepth 1 -type f -name 'id_github.[0-9]*' ! -name '*.pub.*' 2>/dev/null | head -1)
+check "a timestamp-suffixed retired private key exists" "yes" "$([ -n "$retired_priv" ] && echo yes || echo no)"
+contains "the retired private key keeps its original content (moved, not deleted)" \
+	"ORIGINAL-PRIVATE-KEY-MARKER" "$(cat "$retired_priv" 2>/dev/null)"
+check "the new key at the original path no longer has the old content" "" \
+	"$(grep -F 'ORIGINAL-PRIVATE-KEY-MARKER' "$TEST_HOME/.ssh/id_github" 2>/dev/null || true)"
+keygen_log=$(log_of ssh-keygen)
+contains "ssh-keygen regenerated the same path" "-f $TEST_HOME/.ssh/id_github" "$keygen_log"
+contains "ssh-keygen ran with an empty passphrase" "-N" "$keygen_log"
+contains "ssh-keygen embedded the chosen label in the comment" "-C $(id -un)@testhost label-x" "$keygen_log"
+contains "gh ssh-key add uploaded the regenerated github.com key" \
+	"ssh-key add $TEST_HOME/.ssh/id_github.pub --title testhost" "$(log_of gh)"
+contains "a fingerprint hint for the retired key is printed" "fingerprint" "$OUTPUT"
+
+echo "menu: ssh-keys replace - bitbucket.org prints the pub and settings hint"
+reset_test_env
+POST_RESTORE_ONLY=ssh-keys
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host bitbucket.org
+  IdentityFile ~/.ssh/id_bitbucket
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+echo "ORIGINAL-BB-PRIVATE-KEY-MARKER" >"$TEST_HOME/.ssh/id_bitbucket"
+echo "ssh-ed25519 OLDKEYDATA $(id -un)@testhost bitbucket personal" >"$TEST_HOME/.ssh/id_bitbucket.pub"
+run_secrets "1
+y
+work
+q
+" --menu
+retired_priv_bb=$(find "$TEST_HOME/.ssh/retired" -maxdepth 1 -type f -name 'id_bitbucket.[0-9]*' ! -name '*.pub.*' 2>/dev/null | head -1)
+check "a timestamp-suffixed retired bitbucket key exists" "yes" "$([ -n "$retired_priv_bb" ] && echo yes || echo no)"
+contains "the retired bitbucket key keeps its original content" \
+	"ORIGINAL-BB-PRIVATE-KEY-MARKER" "$(cat "$retired_priv_bb" 2>/dev/null)"
+contains "the new bitbucket.org public key is printed for the user to add by hand" \
+	"ssh-ed25519 FAKEFAKEFAKE stub" "$OUTPUT"
+contains "the Bitbucket settings hint is printed" "Bitbucket" "$OUTPUT"
+contains "a fingerprint hint for the old key is printed" "fingerprint" "$OUTPUT"
+check "gh ssh-key add was never used for a non-github host" "" "$(log_of gh | grep id_bitbucket || true)"
+
+echo
+# ==============================================================================
+# --menu: tailscale is never logged out from the menu -- only warned about.
+# ==============================================================================
+echo "menu: tailscale switch never logs out, only warns"
+reset_test_env
+POST_RESTORE_ONLY=tailscale
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+TAILSCALE_STATUS=0
+TAILSCALE_LOGIN_NAME="ts.user@example.test"
+run_secrets "1
+y
+q
+" --menu
+contains "the session-ending warning is printed" "ends every Tailscale connection" "$OUTPUT"
+check "no tailscale command beyond the read-only status probes ran" "" \
+	"$(log_of tailscale | grep -vE '^tailscale status( --json)?$' || true)"
+
+echo
+# ==============================================================================
+# --menu: each ssh:<host> row acts on that key only, and the row numbers stay
+# consecutive around the expanded ssh rows.
+# ==============================================================================
+echo "menu: choosing the bitbucket row when pending generates only that key"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+SSH_GH_OK=1
+GH_STATUS=1
+run_secrets "3
+y
+
+q
+" --menu
+keygen_log=$(log_of ssh-keygen)
+contains "ssh-keygen ran for the bitbucket key" "-f $TEST_HOME/.ssh/bit-hclaro" "$keygen_log"
+not_contains "no keygen call touched the github key" "github-hlclarog" "$keygen_log"
+
+echo "menu: choosing the github row when done + N does nothing"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+GH_STATUS=0
+run_secrets "2
+n
+q
+" --menu
+contains "menu shows the configured account before asking" "testuser" "$OUTPUT"
+check "no ssh-keygen ran (declined)" "" "$(log_of ssh-keygen)"
+
+echo "menu: choosing the github row when done + y replaces only the github key"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+echo "ORIGINAL-GH-PRIVATE-KEY-MARKER" >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 OLDKEYDATA $(id -un)@testhost" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+GH_STATUS=0
+run_secrets "2
+y
+
+q
+" --menu
+retired_priv_gh=$(find "$TEST_HOME/.ssh/retired" -maxdepth 1 -type f -name 'github-hlclarog.[0-9]*' ! -name '*.pub.*' 2>/dev/null | head -1)
+check "the old github key was retired with a timestamp" "yes" "$([ -n "$retired_priv_gh" ] && echo yes || echo no)"
+contains "gh ssh-key add uploaded the regenerated github key" \
+	"ssh-key add $TEST_HOME/.ssh/github-hlclarog.pub --title testhost" "$(log_of gh)"
+not_contains "the bitbucket key was never regenerated" "bit-hclaro" "$(log_of ssh-keygen)"
+
+echo "menu: row numbers stay consecutive around the expanded ssh rows"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+run_secrets "q
+" --menu --no-accounts
+menu_lines=$(printf '%s\n' "$OUTPUT" | grep -E '^[0-9]+ ')
+contains "row 1 is gh" "1   gh" "$(printf '%s\n' "$menu_lines" | sed -n '1p')"
+contains "row 2 is ssh:github.com" "2   ssh:github.com" "$(printf '%s\n' "$menu_lines" | sed -n '2p')"
+contains "row 3 is ssh:bitbucket.org" "3   ssh:bitbucket.org" "$(printf '%s\n' "$menu_lines" | sed -n '3p')"
+contains "row 4 is pi (right after the two expanded ssh rows)" "4   pi" "$(printf '%s\n' "$menu_lines" | sed -n '4p')"
+
+echo
+# ==============================================================================
+# table: columns stay aligned on screen. "✓" is 3 bytes in UTF-8, so padding
+# by bytes put the ACCOUNT column 2 characters left on every done row.
+# ==============================================================================
+echo "table: alignment with multibyte status"
+reset_test_env
+GH_STATUS=0
+run_secrets "" --check --no-accounts
+# ACCOUNT starts after 51 characters: 17 (fits "ssh:bitbucket.org") + space +
+# 32 + space. Counted in characters, not bytes, so the check itself needs a
+# UTF-8 locale.
+misaligned=$(printf '%s\n' "$OUTPUT" | LC_ALL=C.UTF-8 bash -c '
+	while IFS= read -r line; do
+		case "$line" in "STEP "* | [a-z]*" "*) ;; *) continue ;; esac
+		[ "${line:50:1}" = " " ] && [ "${line:51:1}" != " " ] || printf "%s\n" "$line"
+	done')
+check "every row starts ACCOUNT at the same character column" "" "$misaligned"
+contains "a done row is still rendered" "gh                ✓" "$OUTPUT"
+
+# The --menu table has an extra N column (3 + space), so ACCOUNT starts after
+# 55 characters.
+reset_test_env
+GH_STATUS=0
+run_secrets "q
+" --menu --no-accounts
+menu_misaligned=$(printf '%s\n' "$OUTPUT" | LC_ALL=C.UTF-8 bash -c '
+	while IFS= read -r line; do
+		case "$line" in "N   STEP "* | [0-9]*" "*) ;; *) continue ;; esac
+		[ "${line:54:1}" = " " ] && [ "${line:55:1}" != " " ] || printf "%s\n" "$line"
+	done')
+check "every menu row starts ACCOUNT at the same character column" "" "$menu_misaligned"
 
 echo
 echo "$tests_run tests, $tests_failed failed"
