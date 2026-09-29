@@ -332,7 +332,7 @@ check "everything-done: zerotier-cli was never even probed" "" "$(log_of zerotie
 rm -f "$TEST_HOME/.engram/cloud.json"
 ENGRAM_READY=0
 run_secrets "" --check
-contains "engram-cloud unconfigured shows optional" "engram-cloud  optional (not configured)" "$OUTPUT"
+contains "engram-cloud unconfigured shows optional" "engram-cloud      optional (not configured)" "$OUTPUT"
 check "engram-cloud unconfigured does not fail --check" "0" "$RC"
 ENGRAM_READY=1
 
@@ -364,7 +364,7 @@ run_secrets "" --check
 check "everything-pending exit code is 1" "1" "$RC"
 pending_count=$(printf '%s' "$OUTPUT" | grep -c 'pending')
 check "everything-pending: the 10 non-optional-cloud steps mention pending" "10" "$pending_count"
-contains "everything-pending: engram-cloud is optional, not pending" "engram-cloud  optional (not configured)" "$OUTPUT"
+contains "everything-pending: engram-cloud is optional, not pending" "engram-cloud      optional (not configured)" "$OUTPUT"
 check "no gh login was attempted" "" "$(log_of gh | grep -v 'auth status' || true)"
 check "no ssh-keygen ran" "" "$(log_of ssh-keygen)"
 check "no pi launch ran" "" "$(log_of pi)"
@@ -434,6 +434,108 @@ contains "gh ssh-key add ran for the github.com key" \
 	"$(log_of gh)"
 not_contains "gh ssh-key add did NOT run for the non-github host" \
 	"id_example" "$(log_of gh)"
+
+echo
+# ==============================================================================
+# ssh-keys: the summary/menu tables show one row per (host, IdentityFile) pair,
+# never a single aggregate "ssh-keys" row.
+# ==============================================================================
+echo "ssh-keys: table shows one row per key, not one aggregate row"
+reset_test_env
+printf 'Linux version 6.6.0\n' >"$SANDBOX/proc-version-bare"
+POST_RESTORE_PROC_VERSION_FILE="$SANDBOX/proc-version-bare"
+export POST_RESTORE_PROC_VERSION_FILE
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/github-hlclarog
+  IdentitiesOnly yes
+
+Host bitbucket.org
+  HostName bitbucket.org
+  User git
+  IdentityFile ~/.ssh/bit-hclaro
+  IdentitiesOnly yes
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+run_secrets "" --check
+not_contains "no row is literally named ssh-keys" "ssh-keys" "$OUTPUT"
+gh_row=$(printf '%s\n' "$OUTPUT" | grep -E '^ssh:github\.com[[:space:]]')
+contains "github.com row shows done" "✓" "$gh_row"
+contains "github.com row account is the Hi-name, without a github: prefix" "testuser" "$gh_row"
+not_contains "github.com row account has no github: prefix" "github:" "$gh_row"
+bb_row=$(printf '%s\n' "$OUTPUT" | grep -E '^ssh:bitbucket\.org[[:space:]]')
+contains "bitbucket.org row shows pending (key missing)" "pending" "$bb_row"
+contains "bitbucket.org row account is a dash while the key is missing" "-" "$bb_row"
+
+echo "ssh-keys: a non-github row's account comes from the .pub comment label"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE user@host personal" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+run_secrets "" --check
+bb_row=$(printf '%s\n' "$OUTPUT" | grep -E '^ssh:bitbucket\.org[[:space:]]')
+contains "bitbucket.org row account is the pub comment label" "personal" "$bb_row"
+
+echo
+# ==============================================================================
+# --check: the exit code depends on the per-key ssh rows, not an aggregate.
+# Scoped with POST_RESTORE_ONLY=ssh-keys so only the ssh rows affect $RC here.
+# ==============================================================================
+echo "--check: exit 1 when only the bitbucket row is pending"
+reset_test_env
+POST_RESTORE_ONLY=ssh-keys
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+SSH_GH_OK=1
+run_secrets "" --check
+check "exit code is 1 with the bitbucket key missing" "1" "$RC"
+
+echo "--check: exit 0 once both keys exist"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+run_secrets "" --check
+check "exit code is 0 with both keys present" "0" "$RC"
+
+echo
+# ==============================================================================
+# POST_RESTORE_ONLY=ssh:<host> processes only that one key.
+# ==============================================================================
+echo "POST_RESTORE_ONLY=ssh:bitbucket.org processes only the bitbucket key"
+reset_test_env
+POST_RESTORE_ONLY=ssh:bitbucket.org
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+run_secrets "y
+personal
+"
+keygen_log=$(log_of ssh-keygen)
+bit_calls=$(printf '%s\n' "$keygen_log" | grep -c -- "-f $TEST_HOME/.ssh/bit-hclaro " || true)
+check "exactly one ssh-keygen call for the bitbucket key" "1" "$bit_calls"
+not_contains "no ssh-keygen call touched the github key" "github-hlclarog" "$keygen_log"
+contains "the keygen comment ends with the entered label" "-C $(id -un)@testhost personal" "$keygen_log"
+contains "the new bitbucket public key is printed" "ssh-ed25519 FAKEFAKEFAKE stub" "$OUTPUT"
+check "gh was never touched (not a github host)" "" "$(log_of gh)"
 
 echo
 # ==============================================================================
@@ -828,7 +930,8 @@ echo "some-key" >"$TEST_HOME/.ssh/authorized_keys"
 
 run_secrets "" --check
 contains "gh account is detected" "octocat" "$OUTPUT"
-contains "ssh-keys account shows the github.com login" "github:testuser" "$OUTPUT"
+contains "the ssh:github.com row shows the Hi-name account, without a github: prefix" "testuser" "$OUTPUT"
+not_contains "no row is literally named ssh-keys" "ssh-keys" "$OUTPUT"
 contains "claude account shows email and org" "claude.user@example.test (Acme Corp)" "$OUTPUT"
 contains "codex account shows the JWT email claim" "codex.user@example.test" "$OUTPUT"
 contains "pi account shows the JWT profile email claim" "pi.user@example.test" "$OUTPUT"
@@ -985,7 +1088,6 @@ echo "ORIGINAL-PRIVATE-KEY-MARKER" >"$TEST_HOME/.ssh/id_github"
 echo "ssh-ed25519 OLDKEYDATA $(id -un)@testhost" >"$TEST_HOME/.ssh/id_github.pub"
 run_secrets "1
 y
-1
 label-x
 q
 " --menu
@@ -1015,7 +1117,6 @@ echo "ORIGINAL-BB-PRIVATE-KEY-MARKER" >"$TEST_HOME/.ssh/id_bitbucket"
 echo "ssh-ed25519 OLDKEYDATA $(id -un)@testhost bitbucket personal" >"$TEST_HOME/.ssh/id_bitbucket.pub"
 run_secrets "1
 y
-1
 work
 q
 " --menu
@@ -1051,6 +1152,99 @@ check "no tailscale command beyond the read-only status probes ran" "" \
 
 echo
 # ==============================================================================
+# --menu: each ssh:<host> row acts on that key only, and the row numbers stay
+# consecutive around the expanded ssh rows.
+# ==============================================================================
+echo "menu: choosing the bitbucket row when pending generates only that key"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+SSH_GH_OK=1
+GH_STATUS=1
+run_secrets "3
+y
+
+q
+" --menu
+keygen_log=$(log_of ssh-keygen)
+contains "ssh-keygen ran for the bitbucket key" "-f $TEST_HOME/.ssh/bit-hclaro" "$keygen_log"
+not_contains "no keygen call touched the github key" "github-hlclarog" "$keygen_log"
+
+echo "menu: choosing the github row when done + N does nothing"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+: >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+GH_STATUS=0
+run_secrets "2
+n
+q
+" --menu
+contains "menu shows the configured account before asking" "testuser" "$OUTPUT"
+check "no ssh-keygen ran (declined)" "" "$(log_of ssh-keygen)"
+
+echo "menu: choosing the github row when done + y replaces only the github key"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+mkdir -p "$TEST_HOME/.ssh"
+echo "ORIGINAL-GH-PRIVATE-KEY-MARKER" >"$TEST_HOME/.ssh/github-hlclarog"
+echo "ssh-ed25519 OLDKEYDATA $(id -un)@testhost" >"$TEST_HOME/.ssh/github-hlclarog.pub"
+: >"$TEST_HOME/.ssh/bit-hclaro"
+echo "ssh-ed25519 FAKE stub" >"$TEST_HOME/.ssh/bit-hclaro.pub"
+SSH_GH_OK=1
+SSH_HI_NAME=testuser
+GH_STATUS=0
+run_secrets "2
+y
+
+q
+" --menu
+retired_priv_gh=$(find "$TEST_HOME/.ssh/retired" -maxdepth 1 -type f -name 'github-hlclarog.[0-9]*' ! -name '*.pub.*' 2>/dev/null | head -1)
+check "the old github key was retired with a timestamp" "yes" "$([ -n "$retired_priv_gh" ] && echo yes || echo no)"
+contains "gh ssh-key add uploaded the regenerated github key" \
+	"ssh-key add $TEST_HOME/.ssh/github-hlclarog.pub --title testhost" "$(log_of gh)"
+not_contains "the bitbucket key was never regenerated" "bit-hclaro" "$(log_of ssh-keygen)"
+
+echo "menu: row numbers stay consecutive around the expanded ssh rows"
+reset_test_env
+cat >"$FIXTURE_DOTFILES/ssh/config" <<'CONF'
+Host github.com
+  IdentityFile ~/.ssh/github-hlclarog
+Host bitbucket.org
+  IdentityFile ~/.ssh/bit-hclaro
+CONF
+run_secrets "q
+" --menu --no-accounts
+menu_lines=$(printf '%s\n' "$OUTPUT" | grep -E '^[0-9]+ ')
+contains "row 1 is gh" "1   gh" "$(printf '%s\n' "$menu_lines" | sed -n '1p')"
+contains "row 2 is ssh:github.com" "2   ssh:github.com" "$(printf '%s\n' "$menu_lines" | sed -n '2p')"
+contains "row 3 is ssh:bitbucket.org" "3   ssh:bitbucket.org" "$(printf '%s\n' "$menu_lines" | sed -n '3p')"
+contains "row 4 is pi (right after the two expanded ssh rows)" "4   pi" "$(printf '%s\n' "$menu_lines" | sed -n '4p')"
+
+echo
+# ==============================================================================
 # table: columns stay aligned on screen. "✓" is 3 bytes in UTF-8, so padding
 # by bytes put the ACCOUNT column 2 characters left on every done row.
 # ==============================================================================
@@ -1058,18 +1252,19 @@ echo "table: alignment with multibyte status"
 reset_test_env
 GH_STATUS=0
 run_secrets "" --check --no-accounts
-# ACCOUNT starts after 47 characters: 13 + space + 32 + space. Counted in
-# characters, not bytes, so the check itself needs a UTF-8 locale.
+# ACCOUNT starts after 51 characters: 17 (fits "ssh:bitbucket.org") + space +
+# 32 + space. Counted in characters, not bytes, so the check itself needs a
+# UTF-8 locale.
 misaligned=$(printf '%s\n' "$OUTPUT" | LC_ALL=C.UTF-8 bash -c '
 	while IFS= read -r line; do
 		case "$line" in "STEP "* | [a-z]*" "*) ;; *) continue ;; esac
-		[ "${line:46:1}" = " " ] && [ "${line:47:1}" != " " ] || printf "%s\n" "$line"
+		[ "${line:50:1}" = " " ] && [ "${line:51:1}" != " " ] || printf "%s\n" "$line"
 	done')
 check "every row starts ACCOUNT at the same character column" "" "$misaligned"
-contains "a done row is still rendered" "gh            ✓" "$OUTPUT"
+contains "a done row is still rendered" "gh                ✓" "$OUTPUT"
 
 # The --menu table has an extra N column (3 + space), so ACCOUNT starts after
-# 51 characters.
+# 55 characters.
 reset_test_env
 GH_STATUS=0
 run_secrets "q
@@ -1077,7 +1272,7 @@ run_secrets "q
 menu_misaligned=$(printf '%s\n' "$OUTPUT" | LC_ALL=C.UTF-8 bash -c '
 	while IFS= read -r line; do
 		case "$line" in "N   STEP "* | [0-9]*" "*) ;; *) continue ;; esac
-		[ "${line:50:1}" = " " ] && [ "${line:51:1}" != " " ] || printf "%s\n" "$line"
+		[ "${line:54:1}" = " " ] && [ "${line:55:1}" != " " ] || printf "%s\n" "$line"
 	done')
 check "every menu row starts ACCOUNT at the same character column" "" "$menu_misaligned"
 

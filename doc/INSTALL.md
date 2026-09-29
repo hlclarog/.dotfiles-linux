@@ -704,12 +704,15 @@ cd "$HOME/.dotfiles"
 ```
 
 Run a single step with `POST_RESTORE_ONLY=<step-id>`, for example
-`POST_RESTORE_ONLY=tailscale ./scripts/post-restore-secrets`.
+`POST_RESTORE_ONLY=tailscale ./scripts/post-restore-secrets`. SSH keys appear
+in the table and `--menu` as one row per host, `ssh:<host>` (for example
+`ssh:github.com`, `ssh:bitbucket.org`), and each can be run alone with
+`POST_RESTORE_ONLY=ssh:<host>`.
 
 | Step id | What it covers |
 |---|---|
 | `gh` | GitHub CLI device login (`gh auth login`) |
-| `ssh-keys` | Generates any SSH key referenced by `ssh/config` that is still missing, and offers to register it with `gh` or prints it to add by hand |
+| `ssh:<host>` | Generates the SSH key for that host from `ssh/config` if it is still missing, and offers to register it with `gh` (github.com) or prints it to add by hand |
 | `pi` | Pi's OpenAI (ChatGPT) login |
 | `claude` | Claude Code login, then registers the CodeGraph MCP server if it is still missing |
 | `codex` | Codex device login |
