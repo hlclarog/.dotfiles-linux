@@ -356,7 +356,7 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(self.profiles["claude-high"], expected_claude_high)
 
         astra = "openai-codex/gpt-6-astra"
-        sol = "openai-codex/gpt-6-sol"
+        sol = "openai-codex/gpt-6.1-sol"
         astra_roles = {"sdd-proposal", "sdd-spec", "sdd-design", "sdd-apply", "sdd-verify",
                        "jd-judge-a", "jd-judge-b", "review-refuter", "review-validator", "gentle-ai-verify"}
         expected_codex_high = {

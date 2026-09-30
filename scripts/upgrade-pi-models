@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Explicitly migrate exact Opus 5 references in the local Pi profile registry."""
+"""Explicitly migrate exact superseded model references in the local Pi profile registry.
+
+MIGRATIONS is cumulative: add a row when a model is superseded and keep the old
+rows. Each reference moves one step, so when a target is superseded again,
+point its older rows at the newest id too. Only add a row after a minimal
+inference with the new id succeeds on this account.
+"""
 
 import json
 import math
@@ -10,8 +16,12 @@ import sys
 import tempfile
 
 KIND = "gentle-pi.agent_model_profiles"
-OLD = "claude-bridge/claude-opus-5"
-NEW = "claude-bridge/claude-opus-5-5"
+MIGRATIONS = {
+    "claude-bridge/claude-opus-5": "claude-bridge/claude-opus-5-5",
+    # Sonnet 5.5 needs scripts/patch-pi-claude-bridge-1m to keep Sonnet 5's 1M window.
+    "claude-bridge/claude-sonnet-5": "claude-bridge/claude-sonnet-5-5",
+    "openai-codex/gpt-6-sol": "openai-codex/gpt-6.1-sol",
+}
 TARGET = Path.home() / ".pi/gentle-ai/profiles.json"
 
 
@@ -104,8 +114,8 @@ def upgrade():
     count = 0
     for profile in registry["profiles"].values():
         for entry in profile.values():
-            if entry.get("model") == OLD:
-                entry["model"] = NEW
+            if entry.get("model") in MIGRATIONS:
+                entry["model"] = MIGRATIONS[entry["model"]]
                 count += 1
     if count == 0:
         unchanged(info)
@@ -128,7 +138,7 @@ def upgrade():
 
 def main():
     if len(sys.argv) != 1:
-        print("Usage: upgrade-pi-claude-opus", file=sys.stderr)
+        print("Usage: upgrade-pi-models", file=sys.stderr)
         return 2
     try:
         upgrade()

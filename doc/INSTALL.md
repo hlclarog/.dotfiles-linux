@@ -300,12 +300,44 @@ model catalog.
 
 For Claude profile recovery, `config/pi/claude-profiles.json` saves only the
 model and thinking mappings for `current`, `claude-full`, `claude-high`,
-`claude-medium` and `claude-low`. Close Pi before running
-`./scripts/upgrade-pi-claude-opus`
-on an existing registry: it updates exact old Opus references without changing
-the active profile and saves a private backup when it makes changes. The
-migration cannot create a fresh Pi registry; the snapshot is for manual
-recovery, not automatic restore. Restart Pi to load the updated registry.
+`claude-medium` and `claude-low`.
+
+### Upgrade the models in an existing Pi registry
+
+When a model is superseded, close Pi and run:
+
+```bash
+cd "$HOME/.dotfiles"
+./scripts/upgrade-pi-models
+```
+
+It replaces the exact old references listed in its `MIGRATIONS` table (Opus 5
+-> Opus 5.5, Sonnet 5 -> Sonnet 5.5, `gpt-6-sol` -> `gpt-6.1-sol`) across every
+profile, without changing thinking levels, other models or the active profile,
+and saves a private backup when it makes changes. It is a no-op once nothing
+old remains, and it cannot create a fresh Pi registry. Afterwards, restart Pi
+and reapply the active profile with `/gentle:profiles`: that is what rewrites
+`models.json`, the agent frontmatter, `subagents.json` and the orchestrator
+model from the updated registry.
+
+### Keep Claude models at 1M context in Pi
+
+`pi-claude-bridge` only requests the 1M window for the ids in its
+`MEASURED_ONE_M` list and silently runs every other model at 200K; it has no
+setting to opt a model in. Sonnet 5.5 was measured at 1M on this account but
+is not in that list yet, so script 08 runs:
+
+```bash
+"$HOME/.dotfiles/scripts/patch-pi-claude-bridge-1m"
+```
+
+`pi update` replaces the package and drops the edit, so **rerun it after every
+`pi update`**, then restart Pi. It is a no-op once the id is present (also when
+upstream adds it) and refuses to touch `models.ts` if its layout changed.
+`pi --list-models sonnet-5-5` shows `1M` once it applies. Only add an id to the
+script after `claude -p --model '<id>[1m]' --output-format json 'Reply with
+exactly: OK'` succeeds and reports `contextWindow` 1000000: an unentitled
+`[1m]` id fails every turn instead of falling back to 200K.
 
 ---
 

@@ -341,47 +341,47 @@
       "thinking": "medium"
     },
     "sdd-explore": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "sdd-research": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "gentle-ai-explore": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "sdd-proposal": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "sdd-tasks": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "gentle-ai-worker": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "jd-fix-agent": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-readability": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-reliability": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-resilience": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-risk": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "sdd-spec": {
@@ -447,47 +447,47 @@
       "thinking": "low"
     },
     "sdd-explore": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "sdd-research": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "gentle-ai-explore": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "sdd-proposal": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "sdd-tasks": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "gentle-ai-worker": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "jd-fix-agent": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-readability": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "review-reliability": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-resilience": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "medium"
     },
     "review-risk": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "sdd-spec": {
@@ -499,15 +499,15 @@
       "thinking": "high"
     },
     "sdd-apply": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "review-refuter": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "jd-judge-b": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "thinking": "high"
     },
     "sdd-verify": {
