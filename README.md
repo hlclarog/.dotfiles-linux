@@ -161,7 +161,7 @@ repairs anything the repository changed since the last run.
 
 ## Pi model profiles
 
-Switch in Pi with `/gentle:profiles`. A fresh restore installs all eight and
+Switch in Pi with `/gentle:profiles`. A fresh restore installs all six and
 activates `claude-medium`.
 
 | Profile | Use it for |
@@ -169,7 +169,6 @@ activates `claude-medium`.
 | `claude-medium`, `codex-medium` | Everyday work |
 | `claude-low`, `codex-low` | Saving subscription quota |
 | `claude-high`, `codex-high` | The last days before a quota reset: every role at max effort. Switch back afterwards |
-| `claude-full`, `current` | Kept as they were; not for daily use |
 
 To add missing profiles to an existing registry (it never changes the active
 one and keeps a private backup): `~/.dotfiles/scripts/restore-pi-profiles`.

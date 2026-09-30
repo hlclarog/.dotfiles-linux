@@ -1226,7 +1226,7 @@ check "case a: profiles.json active is claude-medium" "claude-medium" "$active"
 key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
 check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
 profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
-check "case a: profiles.json has exactly 8 profiles" "8" "$profile_count"
+check "case a: profiles.json has exactly 6 profiles" "6" "$profile_count"
 claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low", ."codex-high")' "$profiles_file")
 claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
 check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"

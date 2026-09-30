@@ -202,9 +202,9 @@ from Homebrew instead -- it is rewritten to whatever `claude` resolves to on
 PATH, or dropped entirely (falling back to the SDK's own lookup) when no
 `claude` is found. This repair also runs against a `claude-bridge.json` left
 over from an earlier restore, not just a freshly seeded one. Script 08 then
-builds `~/.pi/gentle-ai/profiles.json` with all eight saved profiles
-(`current`, `claude-full`, `claude-high`, `claude-medium`, `claude-low`,
-`codex-high`, `codex-medium`, `codex-low`) with `claude-medium` active, installs every package pinned in the seeded
+builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles
+(`claude-high`, `claude-medium`, `claude-low`, `codex-high`, `codex-medium`,
+`codex-low`) with `claude-medium` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
 is installed explicitly instead -- and finally runs `pi -p
@@ -252,9 +252,9 @@ or rebuilding the registry always leaves `claude-medium` active.
 ### Restore the Pi model profiles (manual recovery for an existing registry)
 
 A fresh machine already has these: script 08 builds
-`~/.pi/gentle-ai/profiles.json` with all eight saved profiles (`current`,
-`claude-full`, `claude-high`, `claude-medium`, `claude-low`, `codex-high`,
-`codex-medium`, `codex-low`) and activates `claude-medium` the first time it
+`~/.pi/gentle-ai/profiles.json` with all six saved profiles (`claude-high`,
+`claude-medium`, `claude-low`, `codex-high`, `codex-medium`, `codex-low`) and
+activates `claude-medium` the first time it
 installs Pi, so nothing else needs to run for a new machine.
 
 This script instead exists for an **existing** registry that predates that
@@ -299,8 +299,8 @@ model availability still depends on valid provider authentication and Pi's
 model catalog.
 
 For Claude profile recovery, `config/pi/claude-profiles.json` saves only the
-model and thinking mappings for `current`, `claude-full`, `claude-high`,
-`claude-medium` and `claude-low`.
+model and thinking mappings for `claude-high`, `claude-medium` and
+`claude-low`.
 
 ### Upgrade the models in an existing Pi registry
 
