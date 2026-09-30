@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Let pi-claude-bridge request the 1M context window for models measured here.
+
+pi-claude-bridge only appends the `[1m]` suffix to ids listed in its
+MEASURED_ONE_M set; every other id silently runs at 200K. It has no setting to
+opt a model in, so this edits the installed src/models.ts. `pi update` replaces
+the package and drops the edit, so rerun this after every update; it is a
+no-op once the id is present, including when upstream adds it itself.
+
+Only add an id after measuring it on this account, for example
+`claude -p --model '<id>[1m]' --output-format json 'Reply with exactly: OK'`
+must succeed and report modelUsage contextWindow 1000000. An unentitled
+`[1m]` id fails every turn instead of falling back to 200K.
+"""
+
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+import tempfile
+
+# claude-sonnet-5-5[1m] measured 2026-09-29: OK, contextWindow 1000000.
+IDS = ("claude-sonnet-5-5",)
+TARGET = Path.home() / ".pi/agent/npm/node_modules/pi-claude-bridge/src/models.ts"
+BLOCK = re.compile(r"^const MEASURED_ONE_M = new Set\(\[\n(?P<body>(?:[ \t]+\"[^\"\n]+\",\n)*)\]\);$", re.M)
+
+
+class UnsafePatch(Exception):
+    """The installed bridge does not look like the layout this patch knows."""
+
+
+def patch():
+    try:
+        info = TARGET.lstat()
+    except FileNotFoundError:
+        print("pi-claude-bridge is not installed; nothing to patch.")
+        return
+    if not stat.S_ISREG(info.st_mode):
+        raise UnsafePatch("models.ts is not a regular file; symlinks are refused.")
+    text = TARGET.read_text(encoding="utf-8")
+    anchors = text.count("const MEASURED_ONE_M = new Set([")
+    blocks = list(BLOCK.finditer(text))
+    if anchors != 1 or len(blocks) != 1:
+        raise UnsafePatch("MEASURED_ONE_M layout changed; update this patch by hand.")
+    block = blocks[0]
+    lines = block.group("body").splitlines(keepends=True)
+    present = set(re.findall(r"\"([^\"]+)\"", block.group("body")))
+    missing = [model for model in IDS if model not in present]
+    if not missing:
+        print("pi-claude-bridge already requests 1M for: " + ", ".join(IDS))
+        return
+
+    indent = re.match(r"[ \t]+", lines[-1]).group(0) if lines else "\t"
+    body = block.group("body") + "".join(f'{indent}"{model}",\n' for model in missing)
+    start, end = block.span("body")
+    patched = text[:start] + body + text[end:]
+
+    fd, pending = tempfile.mkstemp(prefix=".models.ts.pending-", dir=TARGET.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            os.fchmod(file.fileno(), stat.S_IMODE(info.st_mode))
+            file.write(patched)
+            file.flush()
+            os.fsync(file.fileno())
+        now = TARGET.lstat()
+        if (now.st_ino, now.st_mtime_ns, now.st_size) != (info.st_ino, info.st_mtime_ns, info.st_size):
+            raise UnsafePatch("models.ts changed while patching; rerun.")
+        os.replace(pending, TARGET)
+    finally:
+        if os.path.exists(pending):
+            os.unlink(pending)
+    print("pi-claude-bridge now requests 1M for: " + ", ".join(missing) + "; restart Pi to reload it.")
+
+
+def main():
+    if len(sys.argv) != 1:
+        print("Usage: patch-pi-claude-bridge-1m", file=sys.stderr)
+        return 2
+    try:
+        patch()
+    except (UnsafePatch, OSError, UnicodeError) as exc:
+        reason = exc if isinstance(exc, UnsafePatch) else "cannot read or write models.ts"
+        print(f"Patch refused: {reason}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
