@@ -153,7 +153,21 @@ dot self install                                     # re-run every restoration 
 ~/.dotfiles/scripts/post-restore-secrets --check     # anything left to do by hand
 ~/.dotfiles/scripts/bootstrap-linux --check          # Linux servers: system-level settings
 up                                                   # update every package manager (brew, npm, cargo...)
+upall                                                # packages, Pi core/extensions/models, then local bridge patch
 ```
+
+`upall` runs updates serially and stops at the first failure; it does not pull
+Git changes or migrate Pi profiles. Pinned Pi extensions may not be upgraded
+by `pi update --extensions`. The final bridge patch is a local 1M-context
+workaround, not an upstream fix; restart Pi after package updates to load
+changes. After package updates, `upall` also warns if a Homebrew-managed Herdr
+CLI differs from its running server. Homebrew intentionally leaves compatible
+older servers running to preserve pane processes; the warning does not stop or
+restart anything. If you choose to reconnect, first stop all agents, then run
+`herdr server stop` and `herdr` as separate commands from a terminal outside
+Herdr: stopping the server terminates pane processes, including an invoking
+shell inside Herdr. Absent Herdr or unavailable status is ignored.
+`up` remains the package-manager-only shortcut.
 
 `dot self install` also regenerates the agent assets from
 `os/linux/gentle-ai/state.json`, reinstalls stale herdr and Moshi hooks, and

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Update installed packages and Pi, then reapply the local Claude bridge workaround.
+set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+run_stage() {
+    local label=$1 status
+    shift
+    printf 'stage:%s\n' "$label"
+    "$@" || {
+        status=$?
+        printf 'stage:%s failed (exit %s)\n' "$label" "$status" >&2
+        return "$status"
+    }
+}
+
+warn_stale_herdr_server() {
+    local brew_root herdr_path cli_output server_output cli_version='' server_version='' server_running=false line
+    command -v brew >/dev/null 2>&1 || return 0
+    herdr_path=$(command -v herdr) || return 0
+    brew_root=$(brew --prefix 2>/dev/null) || return 0
+    brew list --versions herdr >/dev/null 2>&1 || return 0
+    # Only probe the CLI when the selected executable belongs to Homebrew.
+    case "$herdr_path" in
+        "$brew_root/bin/herdr"|"$brew_root/opt/herdr/bin/herdr"|"$brew_root/Cellar/herdr/"*/bin/herdr) ;;
+        *) return 0 ;;
+    esac
+    cli_output=$(herdr --version 2>/dev/null) || return 0
+    server_output=$(herdr status server 2>/dev/null) || return 0
+    if [[ $cli_output =~ ^herdr[[:space:]]+([^[:space:]]+) ]]; then
+        cli_version=${BASH_REMATCH[1]}
+    fi
+    while IFS= read -r line; do
+        if [[ $line =~ ^[[:space:]]*status:[[:space:]]*running[[:space:]]*$ ]]; then
+            server_running=true
+        elif [[ $line =~ ^[[:space:]]*version:[[:space:]]*([^[:space:]]+)[[:space:]]*$ ]]; then
+            server_version=${BASH_REMATCH[1]}
+        fi
+    done <<< "$server_output"
+    if [[ $server_running == true && -n $cli_version && -n $server_version && $cli_version != "$server_version" ]]; then
+        printf 'warning: Homebrew Herdr CLI %s differs from running server %s. Homebrew keeps compatible servers alive to preserve pane processes. If you choose to reconnect, after stopping all agents, run from a terminal outside Herdr (stopping the server terminates pane processes, including the invoking shell inside Herdr). Run these commands separately:\n  herdr server stop\n  herdr\n' "$cli_version" "$server_version" >&2
+    fi
+    return 0
+}
+
+run_stage 'dot packages' dot package update_all || exit $?
+warn_stale_herdr_server
+run_stage 'Pi core' pi update || exit $?
+run_stage 'Pi extensions' pi update --extensions || exit $?
+run_stage 'Pi model catalog' pi update --models || exit $?
+run_stage 'Claude bridge 1M patch' "$script_dir/patch-pi-claude-bridge-1m" || exit $?
+printf 'Workstation update complete.\n'

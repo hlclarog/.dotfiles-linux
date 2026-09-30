@@ -58,6 +58,7 @@ alias lg='lazygit'
 # dotly
 # ------------------------------------------------------------------------------
 alias up='dot package update_all'
+alias upall='$DOTFILES_PATH/scripts/update-workstation'
 
 # ------------------------------------------------------------------------------
 # Projects
