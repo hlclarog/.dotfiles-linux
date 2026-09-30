@@ -153,7 +153,14 @@ dot self install                                     # re-run every restoration 
 ~/.dotfiles/scripts/post-restore-secrets --check     # anything left to do by hand
 ~/.dotfiles/scripts/bootstrap-linux --check          # Linux servers: system-level settings
 up                                                   # update every package manager (brew, npm, cargo...)
+upall                                                # packages, Pi core/extensions/models, then local bridge patch
 ```
+
+`upall` runs updates serially and stops at the first failure; it does not pull
+Git changes or migrate Pi profiles. Pinned Pi extensions may not be upgraded
+by `pi update --extensions`. The final bridge patch is a local 1M-context
+workaround, not an upstream fix; restart Pi after package updates to load
+changes. `up` remains the package-manager-only shortcut.
 
 `dot self install` also regenerates the agent assets from
 `os/linux/gentle-ai/state.json`, reinstalls stale herdr and Moshi hooks, and
