@@ -9,15 +9,15 @@
       "effort": "medium"
     },
     "sdd-explore": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "sdd-research": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "sdd-proposal": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "sdd-spec": {
@@ -29,7 +29,7 @@
       "effort": "max"
     },
     "sdd-tasks": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "sdd-status": {
@@ -57,11 +57,11 @@
       "effort": "max"
     },
     "jd-fix-agent": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "gentle-ai-explore": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "gentle-ai-verify": {
@@ -69,23 +69,23 @@
       "effort": "max"
     },
     "gentle-ai-worker": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "review-readability": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "review-reliability": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "review-resilience": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "review-risk": {
-      "model": "claude-bridge/claude-sonnet-5",
+      "model": "claude-bridge/claude-sonnet-5-5",
       "effort": "high"
     },
     "sdd-sync": {

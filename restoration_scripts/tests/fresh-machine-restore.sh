@@ -1226,7 +1226,7 @@ check "case a: profiles.json active is claude-medium" "claude-medium" "$active"
 key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
 check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
 profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
-check "case a: profiles.json has exactly 8 profiles" "8" "$profile_count"
+check "case a: profiles.json has exactly 6 profiles" "6" "$profile_count"
 claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low", ."codex-high")' "$profiles_file")
 claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
 check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"
@@ -1274,6 +1274,9 @@ for _pkg in gentle-pi gentle-engram pi-claude-bridge pi-mcp-adapter; do
 	mkdir -p "$HOME_PI_B/.pi/agent/npm/node_modules/$_pkg"
 done
 unset _f _pkg
+mkdir -p "$HOME_PI_B/.pi/agent/npm/node_modules/pi-claude-bridge/src"
+printf 'const MEASURED_ONE_M = new Set([\n\t"claude-sonnet-5",\n]);\n' \
+	>"$HOME_PI_B/.pi/agent/npm/node_modules/pi-claude-bridge/src/models.ts"
 : >"$PI_LOG"
 status_pi_b=$(run08pi "$HOME_PI_B" "$BASE_PI_PATH")
 check "case b: returns success" "0" "$status_pi_b"
@@ -1286,6 +1289,8 @@ for _f in settings subagents claude-bridge mcp; do
 	check "case b: $_f.json sentinel is left untouched" "sentinel-$_f" "$_content"
 done
 unset _f _content
+bridge_1m_b=$(grep -c '"claude-sonnet-5-5",' "$HOME_PI_B/.pi/agent/npm/node_modules/pi-claude-bridge/src/models.ts" || true)
+check "case b: pi-claude-bridge is patched to request 1M for Sonnet 5.5" "1" "$bridge_1m_b"
 
 # Case (c): fnm missing -> skip message mentions 07-node.sh, nothing invoked.
 HOME_PI_C="$SANDBOX/home-pi-c"

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Exercise the manual Opus migration only against disposable HOME directories.
+# Exercise the manual Pi model migration only against disposable HOME directories.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-export UPGRADE_SCRIPT="$ROOT/scripts/upgrade-pi-claude-opus"
+export UPGRADE_SCRIPT="$ROOT/scripts/upgrade-pi-models"
 PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
 import json
 import os
@@ -13,13 +13,17 @@ import tempfile
 import unittest
 
 SCRIPT = Path(os.environ["UPGRADE_SCRIPT"])
-OLD = "claude-bridge/claude-opus-5"
-NEW = "claude-bridge/claude-opus-5-5"
+MIGRATIONS = {
+    "claude-bridge/claude-opus-5": "claude-bridge/claude-opus-5-5",
+    "claude-bridge/claude-sonnet-5": "claude-bridge/claude-sonnet-5-5",
+    "openai-codex/gpt-6-sol": "openai-codex/gpt-6.1-sol",
+}
+OLD, NEW = "claude-bridge/claude-opus-5", "claude-bridge/claude-opus-5-5"
 
 
 class UpgradeTests(unittest.TestCase):
     def setUp(self):
-        self.sandbox = tempfile.TemporaryDirectory(prefix="pi-opus-upgrade-test-")
+        self.sandbox = tempfile.TemporaryDirectory(prefix="pi-models-upgrade-test-")
         self.addCleanup(self.sandbox.cleanup)
         self.root = Path(self.sandbox.name)
         self.home = self.root / "home"
@@ -47,7 +51,7 @@ class UpgradeTests(unittest.TestCase):
 
     def assert_no_leak(self, result):
         output = result.stdout + result.stderr
-        for secret in (OLD, NEW, "private-registry-value"):
+        for secret in (*MIGRATIONS, *MIGRATIONS.values(), "private-registry-value"):
             self.assertNotIn(secret, output)
 
     def test_all_49_exact_references_change_and_everything_else_survives(self):
@@ -87,6 +91,39 @@ class UpgradeTests(unittest.TestCase):
         self.assertEqual((self.target.stat().st_ino, self.target.read_bytes()), (inode, updated))
         self.assertEqual(self.backups(), backups)
         self.assert_no_leak(again)
+
+    def test_every_migration_changes_only_exact_references_across_profiles(self):
+        profiles = {
+            "claude-medium": {
+                **{f"sonnet-{i}": {"model": "claude-bridge/claude-sonnet-5", "thinking": "high"} for i in range(11)},
+                **{f"opus-{i}": {"model": "claude-bridge/claude-opus-5-5", "thinking": "max"} for i in range(6)},
+                "haiku": {"model": "claude-bridge/claude-haiku-4-5", "thinking": "medium"},
+                "similar": {"model": "claude-bridge/claude-sonnet-5-preview", "thinking": "low"},
+            },
+            "codex-high": {
+                **{f"sol-{i}": {"model": "openai-codex/gpt-6-sol", "thinking": "xhigh"} for i in range(16)},
+                **{f"astra-{i}": {"model": "openai-codex/gpt-6-astra", "thinking": "xhigh"} for i in range(10)},
+                "luna": {"model": "openai-codex/gpt-6-luna", "thinking": "high"},
+                "older": {"model": "openai-codex/gpt-5.6-sol", "thinking": "high"},
+            },
+        }
+        before = self.seed(self.registry(profiles=profiles, active="claude-medium"))
+        result = self.run_upgrade()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("27", result.stdout)
+        self.assert_no_leak(result)
+        expected = json.loads(before)
+        for profile in expected["profiles"].values():
+            for role in profile.values():
+                role["model"] = MIGRATIONS.get(role["model"], role["model"])
+        self.assertEqual(json.loads(self.target.read_bytes()), expected)
+        self.assertEqual(len(self.backups()), 1)
+
+        again = self.run_upgrade()
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertIn("0", again.stdout)
+        self.assertEqual(json.loads(self.target.read_bytes()), expected)
+        self.assertEqual(len(self.backups()), 1)
 
     def test_no_old_reference_is_no_op_without_backup_or_reformat(self):
         before = self.seed(self.registry(profiles={"current": {"role": {

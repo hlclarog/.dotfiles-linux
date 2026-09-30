@@ -202,9 +202,9 @@ from Homebrew instead -- it is rewritten to whatever `claude` resolves to on
 PATH, or dropped entirely (falling back to the SDK's own lookup) when no
 `claude` is found. This repair also runs against a `claude-bridge.json` left
 over from an earlier restore, not just a freshly seeded one. Script 08 then
-builds `~/.pi/gentle-ai/profiles.json` with all eight saved profiles
-(`current`, `claude-full`, `claude-high`, `claude-medium`, `claude-low`,
-`codex-high`, `codex-medium`, `codex-low`) with `claude-medium` active, installs every package pinned in the seeded
+builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles
+(`claude-high`, `claude-medium`, `claude-low`, `codex-high`, `codex-medium`,
+`codex-low`) with `claude-medium` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
 is installed explicitly instead -- and finally runs `pi -p
@@ -252,9 +252,9 @@ or rebuilding the registry always leaves `claude-medium` active.
 ### Restore the Pi model profiles (manual recovery for an existing registry)
 
 A fresh machine already has these: script 08 builds
-`~/.pi/gentle-ai/profiles.json` with all eight saved profiles (`current`,
-`claude-full`, `claude-high`, `claude-medium`, `claude-low`, `codex-high`,
-`codex-medium`, `codex-low`) and activates `claude-medium` the first time it
+`~/.pi/gentle-ai/profiles.json` with all six saved profiles (`claude-high`,
+`claude-medium`, `claude-low`, `codex-high`, `codex-medium`, `codex-low`) and
+activates `claude-medium` the first time it
 installs Pi, so nothing else needs to run for a new machine.
 
 This script instead exists for an **existing** registry that predates that
@@ -299,13 +299,45 @@ model availability still depends on valid provider authentication and Pi's
 model catalog.
 
 For Claude profile recovery, `config/pi/claude-profiles.json` saves only the
-model and thinking mappings for `current`, `claude-full`, `claude-high`,
-`claude-medium` and `claude-low`. Close Pi before running
-`./scripts/upgrade-pi-claude-opus`
-on an existing registry: it updates exact old Opus references without changing
-the active profile and saves a private backup when it makes changes. The
-migration cannot create a fresh Pi registry; the snapshot is for manual
-recovery, not automatic restore. Restart Pi to load the updated registry.
+model and thinking mappings for `claude-high`, `claude-medium` and
+`claude-low`.
+
+### Upgrade the models in an existing Pi registry
+
+When a model is superseded, close Pi and run:
+
+```bash
+cd "$HOME/.dotfiles"
+./scripts/upgrade-pi-models
+```
+
+It replaces the exact old references listed in its `MIGRATIONS` table (Opus 5
+-> Opus 5.5, Sonnet 5 -> Sonnet 5.5, `gpt-6-sol` -> `gpt-6.1-sol`) across every
+profile, without changing thinking levels, other models or the active profile,
+and saves a private backup when it makes changes. It is a no-op once nothing
+old remains, and it cannot create a fresh Pi registry. Afterwards, restart Pi
+and reapply the active profile with `/gentle:profiles`: that is what rewrites
+`models.json`, the agent frontmatter, `subagents.json` and the orchestrator
+model from the updated registry.
+
+### Keep Claude models at 1M context in Pi
+
+`pi-claude-bridge` only requests the 1M window for the ids in its
+`MEASURED_ONE_M` list and silently runs every other model at 200K; it has no
+setting to opt a model in. Sonnet 5.5 was measured at 1M on this account but
+is not in that list yet, so script 08 runs:
+
+```bash
+"$HOME/.dotfiles/scripts/patch-pi-claude-bridge-1m"
+```
+
+`pi update` replaces the package and drops the edit, so **rerun it after every
+`pi update`**, then restart Pi. It is a no-op once the id is present (also when
+upstream adds it) and refuses to touch `models.ts` if its layout changed.
+`pi --list-models sonnet-5-5` shows `1M` once it applies. Only add an id to the
+script after `claude -p --model '<id>[1m]' --output-format json 'Reply with
+exactly: OK'` succeeds and reports `contextWindow` 1000000: an unentitled
+`[1m]` id fails every turn instead of falling back to 200K.
 
 ---
 

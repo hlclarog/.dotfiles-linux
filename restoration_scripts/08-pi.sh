@@ -235,6 +235,13 @@ fi
 unset -f pi_pkg_name
 unset pi_settings pi_pkg_src
 
+# pi-claude-bridge runs every model it has not measured at 200K and has no
+# setting to opt one into 1M, so patch its installed list with the ids
+# measured on this account. A no-op once present; rerun after `pi update`.
+if ! python3 "$DOTFILES_PATH/scripts/patch-pi-claude-bridge-1m"; then
+	echo " > pi-claude-bridge 1M patch failed; rerun: $DOTFILES_PATH/scripts/patch-pi-claude-bridge-1m"
+fi
+
 # --- 7. assets -----------------------------------------------------------------
 pi_install_sdd_once() {
 	if command -v timeout >/dev/null 2>&1; then
