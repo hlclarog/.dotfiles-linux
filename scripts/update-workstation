@@ -39,7 +39,7 @@ warn_stale_herdr_server() {
         fi
     done <<< "$server_output"
     if [[ $server_running == true && -n $cli_version && -n $server_version && $cli_version != "$server_version" ]]; then
-        printf 'warning: Homebrew Herdr CLI %s differs from running server %s. Homebrew keeps compatible servers alive to preserve pane processes; stop the server and reconnect manually only when it is safe to interrupt your panes.\n' "$cli_version" "$server_version" >&2
+        printf 'warning: Homebrew Herdr CLI %s differs from running server %s. Homebrew keeps compatible servers alive to preserve pane processes. If you choose to reconnect, after stopping all agents, run from a terminal outside Herdr (stopping the server terminates pane processes, including the invoking shell inside Herdr). Run these commands separately:\n  herdr server stop\n  herdr\n' "$cli_version" "$server_version" >&2
     fi
     return 0
 }

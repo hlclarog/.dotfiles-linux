@@ -45,5 +45,13 @@ The user authorized pushing these changes and explicitly chose `hlclarog/dotly` 
 ## Publication evidence
 Dotly fork branch `hlclarog/dotly:fix/cargo-empty-install-list` resolves to commit `765f9d63993fef4a85f45062950da561b3dab28b`. Main dotfiles branch `hlclarog/.dotfiles-linux:feat/workstation-update-command` resolved to `912fe1b6b3e99932e4335d9280dd769483b6f273` after push, containing `.gitmodules` URL `https://github.com/hlclarog/dotly.git`. The default branches were not changed. Git still reports the excluded submodule `.gitignore` modification and unrelated untracked paths; none were published.
 
+## Follow-up: actionable Herdr warning
+The user observed the version mismatch warning and requests that it suggest exact manual commands, leaving the choice to them after all agents are stopped. Show `herdr server stop` followed by `herdr`, explicitly from a terminal outside Herdr because stopping the server terminates its pane processes, including the invoking shell if inside Herdr. Never execute those commands automatically. Preserve Homebrew-only mismatch guard and tests; amend README and mock assertion.
+
+- [x] T7: Make the warning actionable with safe context and exact commands; strict TDD, independent verification and parent spot-check passed. User authorized a scoped commit and push to the existing feature branch.
+
+## T7 verification
+Writer observed RED when the mismatch mock lacked the required outside-Herdr guidance, then GREEN after updating `scripts/update-workstation`, the mock test and `README.md`. Independent verifier and parent spot check both passed `bash restoration_scripts/tests/update-workstation.sh`; ShellCheck and `git diff --check` passed. The warning prints separate literal `herdr server stop` and `herdr` commands only on a version mismatch, with explicit prerequisites to stop agents and use a terminal outside Herdr. `herdr status server` still reports running at 0.9.2. The real updater was not rerun. RDD `assess` of ambient changes remained unassessable due to unrelated untracked paths; independent verification followed the returned high-risk plan, and the earlier native review lineage remains open.
+
 ## Next step
-Report both published branch URLs and unresolved review/Pi reactivation. Do not merge or open PR without a separate request; keep Herdr server alive.
+Commit and push only `README.md`, `scripts/update-workstation`, `restoration_scripts/tests/update-workstation.sh`, and this task document; verify the remote branch tip. Never run suggested server commands automatically. Preserve unrelated submodule/untracked changes.
