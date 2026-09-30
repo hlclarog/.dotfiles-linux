@@ -160,7 +160,12 @@ upall                                                # packages, Pi core/extensi
 Git changes or migrate Pi profiles. Pinned Pi extensions may not be upgraded
 by `pi update --extensions`. The final bridge patch is a local 1M-context
 workaround, not an upstream fix; restart Pi after package updates to load
-changes. `up` remains the package-manager-only shortcut.
+changes. After package updates, `upall` also warns if a Homebrew-managed Herdr
+CLI differs from its running server. Homebrew intentionally leaves compatible
+older servers running to preserve pane processes; the warning does not stop or
+restart anything. Stop the Herdr server and reconnect manually only when it is
+safe to interrupt those panes. Absent Herdr or unavailable status is ignored.
+`up` remains the package-manager-only shortcut.
 
 `dot self install` also regenerates the agent assets from
 `os/linux/gentle-ai/state.json`, reinstalls stale herdr and Moshi hooks, and

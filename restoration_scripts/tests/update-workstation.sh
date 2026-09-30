@@ -21,8 +21,45 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # A path-named Bash function intercepts the patch invocation, even though the
 # production script uses an absolute path. No fake executable or live HOME needed.
 run_case() (
-    local failure=$1 cwd=$2 safe_patch
+    local failure=$1 cwd=$2 herdr_case=${3:-absent} safe_patch
     cd "$cwd"
+    command() {
+        if [[ "$1" == -v && "$2" == herdr ]]; then
+            [[ "$herdr_case" != absent ]] || return 1
+            if [[ "$herdr_case" == unmanaged ]]; then
+                printf '/other/bin/herdr\n'
+            else
+                printf '/mock/homebrew/bin/herdr\n'
+            fi
+        elif [[ "$1" == -v && "$2" == brew ]]; then
+            printf '/mock/homebrew/bin/brew\n'
+        else
+            builtin command "$@"
+        fi
+    }
+    brew() {
+        case "$*" in
+            --prefix) printf '/mock/homebrew\n' ;;
+            'list --versions herdr') printf 'herdr 0.9.3\n' ;;
+            *) fail "unexpected brew call: $*" ;;
+        esac
+    }
+    herdr() {
+        case "$*" in
+            --version)
+                [[ "$herdr_case" != failed_cli ]] || return 1
+                printf 'herdr 0.9.3\n' ;;
+            'status server')
+                [[ "$herdr_case" != failed ]] || return 1
+                case "$herdr_case" in
+                    match) printf 'status: running\nversion: 0.9.3\n' ;;
+                    stopped) printf 'status: stopped\nversion: 0.9.2\n' ;;
+                    malformed) printf 'status: running\nversion: unknown version\n' ;;
+                    *) printf 'status: running\nversion: 0.9.2\n' ;;
+                esac ;;
+            *) fail "unexpected Herdr command: $*" ;;
+        esac
+    }
     dot() {
         printf 'call:dot %s\n' "$*"
         [[ "$failure" != dot ]]
@@ -89,5 +126,21 @@ check_case() {
 check_case none /  # resolved patch path must not depend on the current directory
 for failure in dot core extensions models patch; do
     check_case "$failure" /
+done
+
+check_herdr_case() {
+    local kind=$1 output status=0
+    output=$(run_case none / "$kind" 2>&1) || status=$?
+    [[ "$status" == 0 ]] || fail "Herdr $kind exited $status: $output"
+    [[ "$output" == *'Workstation update complete.'* ]] || fail "Herdr $kind interrupted updates"
+    case "$kind" in
+        mismatch)
+            [[ "$output" == *'Herdr'*'0.9.3'*'0.9.2'* ]] || fail "missing version warning: $output"
+            [[ "$output" == *'stop'*'reconnect'* ]] || fail "missing manual safety guidance: $output" ;;
+        *) [[ "$output" != *'warning:'* ]] || fail "unexpected Herdr warning for $kind: $output" ;;
+    esac
+}
+for herdr_case in mismatch match absent failed failed_cli stopped malformed unmanaged; do
+    check_herdr_case "$herdr_case"
 done
 printf 'update-workstation mock tests passed\n'
