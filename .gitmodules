@@ -1,4 +1,6 @@
+# The fork's main mirrors upstream dotly; local fixes live on its dotfiles
+# branch, so `git submodule update --remote` must follow dotfiles, not main.
 [submodule "modules/dotly"]
 	path = modules/dotly
 	url = https://github.com/hlclarog/dotly.git
-	branch = main
+	branch = dotfiles
