@@ -207,12 +207,11 @@ by provider and then by tier (`claude-low`, `claude-medium`, `claude-high`,
 `codex-low`, `codex-medium`, `codex-high`) with `claude-medium` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
-is installed explicitly instead -- and finally runs `pi -p
-"/gentle:install-sdd"` **twice** to install the SDD agents, chains and support
-files: gentle-pi only applies the saved models to installed agents at
-session_start, and the first run's install-sdd creates those agents after
-that point in the same session, so they lack model/thinking frontmatter until
-a second session's session_start reapplies the saved models to them.
+is installed explicitly instead -- and finally runs one `pi -p
+"/gentle:install-delegation"` session: since gentle-pi 4.0.0, session_start
+installs the delegation and review agents and then applies the saved models
+to them, so one session is enough. 4.0.0 retired the SDD agents and
+`/gentle:install-sdd`.
 Logging into Pi is one of several manual steps left afterward --
 `~/.pi/agent/auth.json` is never restored -- see "After the restore: logins
 and keys" below for a guided walkthrough of all of them. Switch the active
