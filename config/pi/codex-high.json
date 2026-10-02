@@ -3,58 +3,6 @@
     "model": "openai-codex/gpt-6.1-sol",
     "thinking": "max"
   },
-  "sdd-init": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-onboard": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-explore": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-research": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-proposal": {
-    "model": "openai-codex/gpt-6-astra",
-    "thinking": "max"
-  },
-  "sdd-spec": {
-    "model": "openai-codex/gpt-6-astra",
-    "thinking": "max"
-  },
-  "sdd-design": {
-    "model": "openai-codex/gpt-6-astra",
-    "thinking": "max"
-  },
-  "sdd-tasks": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-status": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-apply": {
-    "model": "openai-codex/gpt-6-astra",
-    "thinking": "max"
-  },
-  "sdd-verify": {
-    "model": "openai-codex/gpt-6-astra",
-    "thinking": "max"
-  },
-  "sdd-sync": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
-  "sdd-archive": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "max"
-  },
   "jd-judge-a": {
     "model": "openai-codex/gpt-6-astra",
     "thinking": "max"

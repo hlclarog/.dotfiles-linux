@@ -180,8 +180,8 @@ activates `claude-medium`.
 
 | Profile | Use it for |
 |---|---|
-| `claude-medium`, `codex-medium` | Everyday work |
 | `claude-low`, `codex-low` | Saving subscription quota |
+| `claude-medium`, `codex-medium` | Everyday work |
 | `claude-high`, `codex-high` | The last days before a quota reset: every role at max effort. Switch back afterwards |
 
 To add missing profiles to an existing registry (it never changes the active

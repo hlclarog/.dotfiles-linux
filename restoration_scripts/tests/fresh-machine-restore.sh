@@ -1227,6 +1227,9 @@ key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
 check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
 profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
 check "case a: profiles.json has exactly 6 profiles" "6" "$profile_count"
+profile_order=$(jq -r '.profiles | keys_unsorted | join(",")' "$profiles_file")
+check "case a: profiles are grouped by provider, then low, medium, high" \
+	"claude-low,claude-medium,claude-high,codex-low,codex-medium,codex-high" "$profile_order"
 claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low", ."codex-high")' "$profiles_file")
 claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
 check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"

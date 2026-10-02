@@ -16,8 +16,9 @@ import unittest
 
 SCRIPT = Path(os.environ["RESTORE_SCRIPT"])
 SOURCE_DIR = Path(os.environ["RESTORE_SOURCE_DIR"])
-NAMES = ("codex-medium", "codex-low", "codex-high", "claude-high")
-NAME = NAMES[0]
+NAMES = ("codex-low", "codex-medium", "codex-high", "claude-high")
+# The profile activated when no registry exists yet.
+NAME = "codex-medium"
 # Each entry is (source file, prefix required of every model, key inside that
 # file -- None means the whole decoded file is the profile).
 SOURCE_FILES = {
@@ -33,14 +34,15 @@ PREFIXES = {
     "codex-high": "openai-codex/",
     "claude-high": "claude-bridge/",
 }
+# gentle-pi 4.0.0 retired the sdd-* agents; these are the roles it still routes.
 CANONICAL_ORDER = [
-    "orchestrator", "sdd-init", "sdd-onboard", "sdd-explore", "sdd-research",
-    "sdd-proposal", "sdd-spec", "sdd-design", "sdd-tasks", "sdd-status",
-    "sdd-apply", "sdd-verify", "sdd-sync", "sdd-archive", "jd-judge-a",
-    "jd-judge-b", "jd-fix-agent", "gentle-ai-explore", "gentle-ai-verify",
-    "gentle-ai-worker", "review-readability", "review-reliability",
-    "review-resilience", "review-risk", "review-refuter", "review-validator",
+    "orchestrator", "jd-judge-a", "jd-judge-b", "jd-fix-agent",
+    "gentle-ai-explore", "gentle-ai-verify", "gentle-ai-worker",
+    "review-readability", "review-reliability", "review-resilience",
+    "review-risk", "review-refuter", "review-validator",
 ]
+CLAUDE_ORDER = ["claude-low", "claude-medium", "claude-high"]
+CODEX_FILES = ["codex-low.json", "codex-medium.json", "codex-high.json"]
 
 
 def wrap(name, profile):
@@ -95,9 +97,9 @@ class RestoreTests(unittest.TestCase):
     def test_fresh_registry_private_and_manual(self):
         result = self.run_restore()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(self.target.read_text()), self.registry(
-            profiles=self.profiles, active=NAME,
-        ))
+        restored = json.loads(self.target.read_text())
+        self.assertEqual(restored, self.registry(profiles=self.profiles, active=NAME))
+        self.assertEqual(list(restored["profiles"]), list(NAMES))
         self.assertEqual(stat.S_IMODE(self.target.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(self.target.parent.stat().st_mode), 0o700)
         self.assertEqual(self.backups(), [])
@@ -202,7 +204,7 @@ class RestoreTests(unittest.TestCase):
         self.assert_safe_output(result)
 
     def test_conflict_in_any_profile_refuses_whole_restore(self):
-        low = NAMES[1]
+        low = "codex-low"
         conflicted = {**self.profiles[low], "orchestrator": {"model": PREFIXES[low] + "other", "thinking": "high"}}
         before = self.seed(self.registry(profiles={low: conflicted}))
         result = self.run_restore()
@@ -347,7 +349,7 @@ class RestoreTests(unittest.TestCase):
     def test_high_profiles_exact_contents_and_canonical_order(self):
         fable = "claude-bridge/claude-fable-5-1"
         opus = "claude-bridge/claude-opus-5-5"
-        fable_roles = {"sdd-proposal", "sdd-design", "jd-judge-b", "jd-fix-agent"}
+        fable_roles = {"jd-judge-b", "jd-fix-agent"}
         expected_claude_high = {
             role: {"model": fable if role in fable_roles else opus, "thinking": "max"}
             for role in CANONICAL_ORDER
@@ -357,14 +359,42 @@ class RestoreTests(unittest.TestCase):
 
         astra = "openai-codex/gpt-6-astra"
         sol = "openai-codex/gpt-6.1-sol"
-        astra_roles = {"sdd-proposal", "sdd-spec", "sdd-design", "sdd-apply", "sdd-verify",
-                       "jd-judge-a", "jd-judge-b", "review-refuter", "review-validator", "gentle-ai-verify"}
+        astra_roles = {"jd-judge-a", "jd-judge-b", "review-refuter", "review-validator", "gentle-ai-verify"}
         expected_codex_high = {
             role: {"model": astra if role in astra_roles else sol, "thinking": "max"}
             for role in CANONICAL_ORDER
         }
         self.assertEqual(list(self.profiles["codex-high"].keys()), CANONICAL_ORDER)
         self.assertEqual(self.profiles["codex-high"], expected_codex_high)
+
+    def test_every_saved_profile_has_only_current_roles_in_canonical_order(self):
+        claude = json.loads((SOURCE_DIR / "claude-profiles.json").read_text())
+        self.assertEqual(list(claude), CLAUDE_ORDER)
+        saved = {**claude, **{name[:-5]: json.loads((SOURCE_DIR / name).read_text()) for name in CODEX_FILES}}
+        for name, profile in saved.items():
+            with self.subTest(profile=name):
+                self.assertEqual(list(profile), CANONICAL_ORDER)
+        seed = json.loads((SOURCE_DIR / "agent/subagents.json").read_text())["model_profiles"]
+        self.assertEqual([role for role in seed if role.startswith("sdd-")], [])
+
+    def test_retired_role_in_source_refused_nothing_changed(self):
+        before = self.seed(self.registry())
+        isolated = self.root / "bundle-retired-role"
+        (isolated / "scripts").mkdir(parents=True)
+        (isolated / "config/pi").mkdir(parents=True)
+        script = isolated / "scripts/restore-pi-profiles"
+        shutil.copyfile(SCRIPT, script)
+        for filename in set(SOURCE_FILES.values()):
+            shutil.copyfile(SOURCE_DIR / filename, isolated / f"config/pi/{filename}")
+        source = isolated / "config/pi/codex-low.json"
+        data = json.loads(source.read_text())
+        data["sdd-apply"] = data.pop("review-risk")
+        source.write_text(json.dumps(data))
+        result = self.run_restore(script)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Source profile codex-low ", result.stderr)
+        self.assertEqual(self.target.read_bytes(), before)
+        self.assertEqual(self.backups(), [])
 
     def test_fresh_refuses_public_existing_directory(self):
         self.target.parent.mkdir(parents=True)

@@ -202,9 +202,9 @@ from Homebrew instead -- it is rewritten to whatever `claude` resolves to on
 PATH, or dropped entirely (falling back to the SDK's own lookup) when no
 `claude` is found. This repair also runs against a `claude-bridge.json` left
 over from an earlier restore, not just a freshly seeded one. Script 08 then
-builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles
-(`claude-high`, `claude-medium`, `claude-low`, `codex-high`, `codex-medium`,
-`codex-low`) with `claude-medium` active, installs every package pinned in the seeded
+builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles, grouped
+by provider and then by tier (`claude-low`, `claude-medium`, `claude-high`,
+`codex-low`, `codex-medium`, `codex-high`) with `claude-medium` active, installs every package pinned in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
 silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
 is installed explicitly instead -- and finally runs `pi -p
@@ -241,7 +241,7 @@ fnm exec --using=default gentle-ai sync
 ### The `high` profiles: spending down a subscription window
 
 `claude-high` and `codex-high` run every role at maximum effort (`"thinking":
-"max"` on every one of the 26 roles). They exist only for the last stretch of
+"max"` on every one of the 13 roles). They exist only for the last stretch of
 a subscription window, to spend whatever quota is left before it resets --
 not for everyday use, since they are the most expensive profiles available.
 Switch to one from inside Pi with `/gentle:profiles`, and switch back to a
@@ -252,8 +252,8 @@ or rebuilding the registry always leaves `claude-medium` active.
 ### Restore the Pi model profiles (manual recovery for an existing registry)
 
 A fresh machine already has these: script 08 builds
-`~/.pi/gentle-ai/profiles.json` with all six saved profiles (`claude-high`,
-`claude-medium`, `claude-low`, `codex-high`, `codex-medium`, `codex-low`) and
+`~/.pi/gentle-ai/profiles.json` with all six saved profiles (`claude-low`,
+`claude-medium`, `claude-high`, `codex-low`, `codex-medium`, `codex-high`) and
 activates `claude-medium` the first time it
 installs Pi, so nothing else needs to run for a new machine.
 
@@ -299,8 +299,13 @@ model availability still depends on valid provider authentication and Pi's
 model catalog.
 
 For Claude profile recovery, `config/pi/claude-profiles.json` saves only the
-model and thinking mappings for `claude-high`, `claude-medium` and
-`claude-low`.
+model and thinking mappings for `claude-low`, `claude-medium` and
+`claude-high`. Every saved profile routes the same 13 roles in the same order:
+the orchestrator, `jd-judge-a`, `jd-judge-b`, `jd-fix-agent`, the three
+`gentle-ai-*` agents and the six `review-*` roles. gentle-pi 4.0.0 retired the
+`sdd-*` agents, so they are no longer part of any profile; `review-refuter`
+and `review-validator` have no agent file but stay, because the review relay
+still routes them by name.
 
 ### Upgrade the models in an existing Pi registry
 

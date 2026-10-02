@@ -9,8 +9,17 @@ import stat
 import sys
 import tempfile
 
-# The first name is the one activated when no registry exists yet.
-NAMES = ("codex-medium", "codex-low", "codex-high", "claude-high")
+NAMES = ("codex-low", "codex-medium", "codex-high", "claude-high")
+# The profile activated when no registry exists yet.
+ACTIVE = "codex-medium"
+# gentle-pi 4.0.0 retired the sdd-* agents; these are the roles it still routes,
+# in the order every saved profile uses.
+ROLES = (
+    "orchestrator", "jd-judge-a", "jd-judge-b", "jd-fix-agent",
+    "gentle-ai-explore", "gentle-ai-verify", "gentle-ai-worker",
+    "review-readability", "review-reliability", "review-resilience",
+    "review-risk", "review-refuter", "review-validator",
+)
 KIND = "gentle-pi.agent_model_profiles"
 THINKING = {"off", "minimal", "low", "medium", "high", "xhigh", "max"}
 SOURCE_DIR = Path(__file__).resolve().parent.parent / "config/pi"
@@ -61,7 +70,7 @@ def validated_source(name):
         profile = data if key is None else data[key]
     except (OSError, ValueError, UnicodeError, KeyError, TypeError) as exc:
         raise UnsafeRestore(f"Source profile {name} is missing or invalid; no registry was changed.") from exc
-    if (not isinstance(profile, dict) or len(profile) != 26 or
+    if (not isinstance(profile, dict) or tuple(profile) != ROLES or
             any(not isinstance(role, str) or not isinstance(entry, dict) or
                 set(entry) != {"model", "thinking"} or
                 type(entry["model"]) is not str or
@@ -131,7 +140,7 @@ def restore(replace=False):
         for name in pending_names:
             registry["profiles"][name] = profiles[name]
     else:
-        registry = {"kind": KIND, "version": 1, "profiles": profiles, "active": NAMES[0]}
+        registry = {"kind": KIND, "version": 1, "profiles": profiles, "active": ACTIVE}
         TARGET.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if not stat.S_ISDIR(TARGET.parent.stat().st_mode) or TARGET.parent.stat().st_mode & 0o077:
             raise UnsafeRestore("Registry directory is not private; inspect it manually.")
