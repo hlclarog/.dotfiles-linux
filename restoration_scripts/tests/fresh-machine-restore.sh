@@ -1101,7 +1101,7 @@ if [ "$1" = "install" ]; then
 	mkdir -p "$HOME/.pi/agent/npm/node_modules/$pkg"
 fi
 if [ "$1" = "-p" ]; then
-	exit "${PI_SDD_EXIT:-${PI_EXIT:-0}}"
+	exit "${PI_ASSETS_EXIT:-${PI_EXIT:-0}}"
 fi
 exit "${PI_EXIT:-0}"
 PISTUB
@@ -1175,8 +1175,8 @@ run08pi() {
 		BREW_PREFIX_CANDIDATES="${4:-/no/such/brew-a /no/such/brew-b}"
 		CURL_FAIL="${5:-0}"
 		PI_EXIT="${6:-0}"
-		PI_SDD_EXIT="${7:-}"
-		export HOME PATH PI_INSTALL_URL BREW_PREFIX_CANDIDATES CURL_FAIL PI_EXIT PI_SDD_EXIT PI_LOG DOTFILES_PATH
+		PI_ASSETS_EXIT="${7:-}"
+		export HOME PATH PI_INSTALL_URL BREW_PREFIX_CANDIDATES CURL_FAIL PI_EXIT PI_ASSETS_EXIT PI_LOG DOTFILES_PATH
 		. "$SCRIPT_08"
 	) >"$SANDBOX/out08pi" 2>&1
 	echo $?
@@ -1227,6 +1227,9 @@ key_order=$(jq -r 'keys_unsorted | join(",")' "$profiles_file")
 check "case a: profiles.json top-level key order" "kind,version,profiles,active" "$key_order"
 profile_count=$(jq -r '.profiles | keys | length' "$profiles_file")
 check "case a: profiles.json has exactly 6 profiles" "6" "$profile_count"
+profile_order=$(jq -r '.profiles | keys_unsorted | join(",")' "$profiles_file")
+check "case a: profiles are grouped by provider, then low, medium, high" \
+	"claude-low,claude-medium,claude-high,codex-low,codex-medium,codex-high" "$profile_order"
 claude_match=$(jq -S '.profiles | del(."codex-medium", ."codex-low", ."codex-high")' "$profiles_file")
 claude_expected=$(jq -S '.' "$DOTFILES_PATH/config/pi/claude-profiles.json")
 check "case a: claude profiles match the repo snapshot" "$claude_expected" "$claude_match"
@@ -1248,19 +1251,20 @@ install_calls=$(grep '^pi install ' "$PI_LOG")
 expected_installs=$(jq -r '.packages[] | "pi install " + .' "$DOTFILES_PATH/config/pi/agent/settings.json")
 check "case a: pi install runs once per package with the exact sources" "$expected_installs" "$install_calls"
 
-sdd_first_line=$(grep -n '^pi -p /gentle:install-sdd$' "$PI_LOG" | head -n1 | cut -d: -f1)
+assets_line=$(grep -n '^pi -p /gentle:install-delegation$' "$PI_LOG" | head -n1 | cut -d: -f1)
 last_install_line=$(grep -n '^pi install ' "$PI_LOG" | tail -n1 | cut -d: -f1)
-if [ -n "$sdd_first_line" ] && [ -n "$last_install_line" ] && [ "$sdd_first_line" -gt "$last_install_line" ]; then
-	sdd_order_ok=yes
+if [ -n "$assets_line" ] && [ -n "$last_install_line" ] && [ "$assets_line" -gt "$last_install_line" ]; then
+	assets_order_ok=yes
 else
-	sdd_order_ok=no
+	assets_order_ok=no
 fi
-check "case a: both SDD install runs happen after every package install" "yes" "$sdd_order_ok"
-sdd_calls_a=$(grep -c '^pi -p /gentle:install-sdd$' "$PI_LOG")
-check "case a: install-sdd runs exactly twice" "2" "$sdd_calls_a"
+check "case a: the asset install session runs after every package install" "yes" "$assets_order_ok"
+assets_calls_a=$(grep -c '^pi -p /gentle:install-delegation$' "$PI_LOG")
+check "case a: one asset install session runs" "1" "$assets_calls_a"
+retired_calls_a=$(grep -c '^pi -p /gentle:install-sdd$' "$PI_LOG" || true)
+check "case a: the retired install-sdd command is never sent" "0" "$retired_calls_a"
 success_msg_count_a=$(printf '%s\n' "$out_pi_a" | grep -c 'Pi agent assets installed')
 check "case a: success message is reported once" "1" "$success_msg_count_a"
-contains "case a: reports the SDD assets installed" "Pi agent assets installed" "$out_pi_a"
 
 # Case (b): rerun -- Pi and the seed files already exist.
 HOME_PI_B="$SANDBOX/home-pi-b"
@@ -1378,17 +1382,18 @@ for _case in f2 f3; do
 done
 unset _case _home _profiles _before _status _out _hint
 
-# Case (g): the first install-sdd attempt fails -> no second attempt is made,
-# the existing failure message style is kept, status is still 0.
+# Case (g): the asset install session fails -> it is reported with a rerun
+# hint, nothing is retried, status is still 0.
 HOME_PI_G="$SANDBOX/home-pi-g"
 mkdir -p "$HOME_PI_G"
 : >"$PI_LOG"
 status_pi_g=$(run08pi "$HOME_PI_G" "$BASE_PI_PATH" "" "" 0 0 7)
 out_pi_g=$(cat "$SANDBOX/out08pi")
 check "case g: returns success" "0" "$status_pi_g"
-sdd_calls_g=$(grep -c '^pi -p /gentle:install-sdd$' "$PI_LOG")
-check "case g: install-sdd is attempted only once" "1" "$sdd_calls_g"
-contains "case g: reports the install-sdd failure" "Pi agent asset install failed (exit 7)" "$out_pi_g"
+assets_calls_g=$(grep -c '^pi -p /gentle:install-delegation$' "$PI_LOG")
+check "case g: the asset install is attempted only once" "1" "$assets_calls_g"
+contains "case g: reports the asset install failure" "Pi agent asset install failed (exit 7)" "$out_pi_g"
+contains "case g: the rerun hint names the current command" 'pi -p "/gentle:install-delegation"' "$out_pi_g"
 
 # ==============================================================================
 # claude-bridge.json path repair -- pathToClaudeCodeExecutable must point at

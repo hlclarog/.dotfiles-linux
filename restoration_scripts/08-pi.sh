@@ -30,13 +30,13 @@
 # installs herdr's pi integration only when ~/.pi/agent already exists, which
 # this script is what creates on a fresh machine).
 #
-# WHY INSTALL-SDD RUNS TWICE: gentle-pi applies the saved models
-# (~/.pi/gentle-ai/models.json) to installed agents only at session_start.
-# The first `pi -p "/gentle:install-sdd"` run creates the 12 sdd-*.md agents
-# AFTER that point in the same session, so they end up without model/thinking
-# frontmatter. Measured on a fresh Ubuntu VM: a second run's session_start
-# reapplies the saved models to the agents the first run just created, fixing
-# every one of them.
+# WHY ONE ASSET SESSION: since gentle-pi 4.0.0, session_start installs the
+# delegation and review agents and only then applies the saved models
+# (~/.pi/gentle-ai/models.json), so a single `pi -p` session leaves every
+# agent with its model/thinking frontmatter. 4.0.0 also retired the SDD agents
+# and `/gentle:install-sdd` (which needed a second run); the
+# `/gentle:install-delegation` sent here is a real command, so the session
+# never reaches the model.
 #
 # WHY THE CLAUDE-BRIDGE PATH IS REPAIRED: the seed's pathToClaudeCodeExecutable
 # assumes Claude's native installer (~/.local/bin/claude), matching the
@@ -175,12 +175,12 @@ pi_profiles="$HOME/.pi/gentle-ai/profiles.json"
 if [ ! -f "$pi_profiles" ]; then
 	jq -n \
 		--slurpfile pi_claude "$DOTFILES_PATH/config/pi/claude-profiles.json" \
-		--slurpfile pi_codex_medium "$DOTFILES_PATH/config/pi/codex-medium.json" \
 		--slurpfile pi_codex_low "$DOTFILES_PATH/config/pi/codex-low.json" \
+		--slurpfile pi_codex_medium "$DOTFILES_PATH/config/pi/codex-medium.json" \
 		--slurpfile pi_codex_high "$DOTFILES_PATH/config/pi/codex-high.json" \
 		--arg pi_active "$pi_active_profile" \
 		'{kind: "gentle-pi.agent_model_profiles", version: 1,
-		  profiles: ($pi_claude[0] + {"codex-medium": $pi_codex_medium[0], "codex-low": $pi_codex_low[0], "codex-high": $pi_codex_high[0]}),
+		  profiles: ($pi_claude[0] + {"codex-low": $pi_codex_low[0], "codex-medium": $pi_codex_medium[0], "codex-high": $pi_codex_high[0]}),
 		  active: $pi_active}' >"$pi_profiles"
 	chmod 600 "$pi_profiles"
 elif ! jq -e '.profiles["codex-medium"] and .profiles["codex-low"] and .profiles["codex-high"] and .profiles["claude-high"]' "$pi_profiles" >/dev/null 2>&1; then
@@ -243,34 +243,19 @@ if ! python3 "$DOTFILES_PATH/scripts/patch-pi-claude-bridge-1m"; then
 fi
 
 # --- 7. assets -----------------------------------------------------------------
-pi_install_sdd_once() {
-	if command -v timeout >/dev/null 2>&1; then
-		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" timeout 180 pi -p "/gentle:install-sdd" </dev/null >/dev/null 2>&1)
-	else
-		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" pi -p "/gentle:install-sdd" </dev/null >/dev/null 2>&1)
-	fi
-}
-
 if [ -d "$HOME/.pi/agent/npm/node_modules/gentle-pi" ]; then
-	pi_sdd_status=0
-	pi_install_sdd_once || pi_sdd_status=$?
-	if [ "$pi_sdd_status" -eq 0 ]; then
-		# Run install-sdd a second time: gentle-pi applies the saved models
-		# (~/.pi/gentle-ai/models.json) to installed agents only at
-		# session_start, and the first run's install-sdd creates the 12
-		# sdd-*.md agents AFTER that point in the same session, leaving them
-		# without model/thinking frontmatter. The second session's
-		# session_start reapplies the saved models to the agents the first
-		# run just created.
-		pi_install_sdd_once || pi_sdd_status=$?
+	pi_assets_status=0
+	if command -v timeout >/dev/null 2>&1; then
+		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" timeout 180 pi -p "/gentle:install-delegation" </dev/null >/dev/null 2>&1) || pi_assets_status=$?
+	else
+		(cd "$HOME" && fnm exec --using=default "${pi_detach[@]}" pi -p "/gentle:install-delegation" </dev/null >/dev/null 2>&1) || pi_assets_status=$?
 	fi
-	if [ "$pi_sdd_status" -eq 0 ]; then
+	if [ "$pi_assets_status" -eq 0 ]; then
 		echo " > Pi agent assets installed"
 	else
-		echo " > Pi agent asset install failed (exit $pi_sdd_status); rerun: fnm exec --using=default pi -p \"/gentle:install-sdd\""
+		echo " > Pi agent asset install failed (exit $pi_assets_status); rerun: fnm exec --using=default pi -p \"/gentle:install-delegation\""
 	fi
-	unset -f pi_install_sdd_once
-	unset pi_sdd_status
+	unset pi_assets_status
 fi
 
 unset pi_detach
