@@ -31,10 +31,11 @@ warn_stale_herdr_server() {
     if [[ $cli_output =~ ^herdr[[:space:]]+([^[:space:]]+) ]]; then
         cli_version=${BASH_REMATCH[1]}
     fi
+    # Herdr prints `Status:` capitalized and `version:` lowercase; accept either case.
     while IFS= read -r line; do
-        if [[ $line =~ ^[[:space:]]*status:[[:space:]]*running[[:space:]]*$ ]]; then
+        if [[ $line =~ ^[[:space:]]*[Ss]tatus:[[:space:]]*running[[:space:]]*$ ]]; then
             server_running=true
-        elif [[ $line =~ ^[[:space:]]*version:[[:space:]]*([^[:space:]]+)[[:space:]]*$ ]]; then
+        elif [[ $line =~ ^[[:space:]]*[Vv]ersion:[[:space:]]*([^[:space:]]+)[[:space:]]*$ ]]; then
             server_version=${BASH_REMATCH[1]}
         fi
     done <<< "$server_output"
