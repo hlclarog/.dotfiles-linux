@@ -51,13 +51,14 @@ run_case() (
                 printf 'herdr 0.9.3\n' ;;
             'status server')
                 [[ "$herdr_case" != failed ]] || return 1
-                # Mirror real Herdr 0.9.3 output: capitalized Status, lowercase
-                # version, plus extra keys the parser must ignore.
+                # Mirror real Herdr 0.9.3 output: lowercase keys plus extra keys
+                # the parser must ignore. mismatch_capitalized guards key casing.
                 case "$herdr_case" in
-                    match) printf 'Status: running\nversion: 0.9.3\nendpoint_compatible: yes\n' ;;
-                    stopped) printf 'Status: stopped\nversion: 0.9.2\n' ;;
-                    malformed) printf 'Status: running\nversion: unknown version\n' ;;
-                    *) printf 'Status: running\nversion: 0.9.2\nendpoint_compatible: yes\nprivate_protocol: 22\n' ;;
+                    match) printf 'status: running\nversion: 0.9.3\nendpoint_compatible: yes\n' ;;
+                    stopped) printf 'status: stopped\nversion: 0.9.2\n' ;;
+                    malformed) printf 'status: running\nversion: unknown version\n' ;;
+                    mismatch_capitalized) printf 'Status: running\nVersion: 0.9.2\n' ;;
+                    *) printf 'status: running\nversion: 0.9.2\nendpoint_compatible: yes\nprivate_protocol: 22\n' ;;
                 esac ;;
             *) fail "unexpected Herdr command: $*" ;;
         esac
@@ -136,7 +137,7 @@ check_herdr_case() {
     [[ "$status" == 0 ]] || fail "Herdr $kind exited $status: $output"
     [[ "$output" == *'Workstation update complete.'* ]] || fail "Herdr $kind interrupted updates"
     case "$kind" in
-        mismatch)
+        mismatch|mismatch_capitalized)
             [[ "$output" == *'Herdr'*'0.9.3'*'0.9.2'* ]] || fail "missing version warning: $output"
             [[ "$output" == *'after stopping all agents'*'terminal outside Herdr'* ]] || fail "missing safe manual precondition: $output"
             [[ "$output" == *'stopping the server terminates pane processes, including the invoking shell inside Herdr'* ]] || fail "missing pane safety warning: $output"
@@ -146,7 +147,7 @@ check_herdr_case() {
             [[ "$output" != *'herdr server stop'* && "$output" != *$'\n  herdr\n'* ]] || fail "unexpected manual commands for $kind: $output" ;;
     esac
 }
-for herdr_case in mismatch match absent failed failed_cli stopped malformed unmanaged; do
+for herdr_case in mismatch mismatch_capitalized match absent failed failed_cli stopped malformed unmanaged; do
     check_herdr_case "$herdr_case"
 done
 printf 'update-workstation mock tests passed\n'
