@@ -51,11 +51,13 @@ run_case() (
                 printf 'herdr 0.9.3\n' ;;
             'status server')
                 [[ "$herdr_case" != failed ]] || return 1
+                # Mirror real Herdr 0.9.3 output: capitalized Status, lowercase
+                # version, plus extra keys the parser must ignore.
                 case "$herdr_case" in
-                    match) printf 'status: running\nversion: 0.9.3\n' ;;
-                    stopped) printf 'status: stopped\nversion: 0.9.2\n' ;;
-                    malformed) printf 'status: running\nversion: unknown version\n' ;;
-                    *) printf 'status: running\nversion: 0.9.2\n' ;;
+                    match) printf 'Status: running\nversion: 0.9.3\nendpoint_compatible: yes\n' ;;
+                    stopped) printf 'Status: stopped\nversion: 0.9.2\n' ;;
+                    malformed) printf 'Status: running\nversion: unknown version\n' ;;
+                    *) printf 'Status: running\nversion: 0.9.2\nendpoint_compatible: yes\nprivate_protocol: 22\n' ;;
                 esac ;;
             *) fail "unexpected Herdr command: $*" ;;
         esac
