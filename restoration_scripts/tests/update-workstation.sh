@@ -138,10 +138,10 @@ check_herdr_case() {
     [[ "$output" == *'Workstation update complete.'* ]] || fail "Herdr $kind interrupted updates"
     case "$kind" in
         mismatch|mismatch_capitalized)
-            [[ "$output" == *'Herdr'*'0.9.3'*'0.9.2'* ]] || fail "missing version warning: $output"
-            [[ "$output" == *'after stopping all agents'*'terminal outside Herdr'* ]] || fail "missing safe manual precondition: $output"
-            [[ "$output" == *'stopping the server terminates pane processes, including the invoking shell inside Herdr'* ]] || fail "missing pane safety warning: $output"
-            [[ "$output" == *$'\n  herdr server stop\n  herdr\n'* ]] || fail "missing separate, ordered manual commands: $output" ;;
+            [[ "$output" == *'Herdr'*'0.9.3'*'0.9.2'* ]] || fail "$kind: missing version warning: $output"
+            [[ "$output" == *'after stopping all agents'*'terminal outside Herdr'* ]] || fail "$kind: missing safe manual precondition: $output"
+            [[ "$output" == *'stopping the server terminates pane processes, including the invoking shell inside Herdr'* ]] || fail "$kind: missing pane safety warning: $output"
+            [[ "$output" == *$'\n  herdr server stop\n  herdr\n'* ]] || fail "$kind: missing separate, ordered manual commands: $output" ;;
         *)
             [[ "$output" != *'warning:'* ]] || fail "unexpected Herdr warning for $kind: $output"
             [[ "$output" != *'herdr server stop'* && "$output" != *$'\n  herdr\n'* ]] || fail "unexpected manual commands for $kind: $output" ;;

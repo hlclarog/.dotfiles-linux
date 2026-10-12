@@ -1,7 +1,7 @@
 # Fix upall Herdr warning and Zim stage
 
 ## Objective
-`upall` never prints the stale Herdr server warning, and its dotly stage fails with `ZIM_HOME: unbound variable`. Make the warning fire on real Herdr output and skip the Zim update when Zim is not configured.
+`upall` showed no stale Herdr server warning, and its dotly stage fails with `ZIM_HOME: unbound variable`. Confirm the warning fires on real Herdr output, tolerate key casing, and skip the Zim update when Zim is not configured.
 
 ## Evidence and constraints
 - Correction (2026-10-12): an earlier reading showed `Status: running` (capital S) and blamed the lowercase match in `scripts/update-workstation` for the missing warning. A byte-level check (`od -c`, three runs) shows Herdr 0.9.3 prints `status: running` in lowercase, which the original parser already matched. The warning was absent only because CLI and server were both 0.9.3.
