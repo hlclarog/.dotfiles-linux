@@ -13,11 +13,16 @@ Provide one shell alias to run the existing dotly package updater and Pi core, e
 
 ## Tasks
 - [x] T1: Add tested `upall` alias and fail-visible serial updater invoking dotly, Pi self, Pi extensions, Pi model catalog, then the bridge patch. Implemented and verified in work-unit commit `83e8649ac54fb9514a64cf55a4d9606fa331b0f8`.
-- [ ] T2: Safely apply merged profile migrations and bridge patch to local installation, compare managed mappings, preserve active choice and private backup; verify status and document any restart/reapply step. Registry and patch applied; effective `models.json` and Pi default still need activation from `/gentle:profiles` after restart.
-- [ ] T3: Verify Git diff and local outcome, report command behavior, downloaded changes and any incomplete checks. Independent checks passed except the known effective-model mismatch; native review remains open. User explicitly authorized pushing the feature branch and Dotly fork; no PR or master merge requested.
-- [ ] T4: Resolve the native review lineage `review-f16a633fb292457d` after a provider-bound capture can be admitted; do not claim approval while reviewing.
+- [x] T2 (closed, superseded): Safely apply merged profile migrations and bridge patch to local installation, compare managed mappings, preserve active choice and private backup; verify status and document any restart/reapply step. Registry and patch applied; effective `models.json` and Pi default still need activation from `/gentle:profiles` after restart.
+- [x] T3 (closed, delivered): Verify Git diff and local outcome, report command behavior, downloaded changes and any incomplete checks. Independent checks passed except the known effective-model mismatch; native review remains open. User explicitly authorized pushing the feature branch and Dotly fork; no PR or master merge requested.
+- [x] T4 (closed, obsolete): Resolve the native review lineage `review-f16a633fb292457d` after a provider-bound capture can be admitted; do not claim approval while reviewing.
 - [x] T5: In the user-authorized external Dotly submodule, prevent Cargo installation when `cargo install --list` is empty, with isolated tests. Work-unit commit `765f9d63993fef4a85f45062950da561b3dab28b` on `fix/cargo-empty-install-list`; main gitlink committed in `9f1fbca82095955b6569e1a4271e73bde88a84e2`.
 - [x] T6: Update `upall` to detect and explain a stale Homebrew-managed Herdr server after a package upgrade, without stopping or restarting any server; mocked tests/docs and implementation committed as `9f1fbca82095955b6569e1a4271e73bde88a84e2`.
+
+## Closure (2026-10-12)
+- T2: superseded by `odd/tasks/pi-profiles-gentle-pi-4.md` (#46), which rebuilt the profiles and verified the live registry, `models.json` and `subagents.json` against the snapshots.
+- T3: delivered; the feature branch merged into master through #40.
+- T4: obsolete; `gentle-ai review status --cwd .` reports `status: clean` with no entries, so lineage `review-f16a633fb292457d` no longer exists. No approval is claimed for it.
 
 ## Progress
 Created feature branch `feat/workstation-update-command` at master `1f178d9`. T1 committed as `83e8649ac54fb9514a64cf55a4d9606fa331b0f8` (`feat(shell): add unified workstation update shortcut`); unrelated untracked work left untouched. T2 patched the installed bridge for Sonnet 5.5 at 1M, migrated 78 model references with private registry backup `profiles.json.backup-nu8n64p8`, and found four managed profiles already up to date. Pi sessions were live, so reactivation remains pending.
