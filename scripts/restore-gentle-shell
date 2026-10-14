@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Explicit migration for existing VMs; also called after fresh Pi restoration.
+set -euo pipefail
+[[ $# -le 1 ]] || { printf 'gentle-shell: expected at most one option\n' >&2; exit 2; }
+check=false
+case "${1:-}" in
+    --help|-h)
+        printf '%s\n' 'Usage: scripts/restore-gentle-shell [--check]' \
+            'Reuse the existing Pi home, repair missing launcher support, and link ~/.local/bin/gentle-shell.' \
+            '--check checks readiness without installing, updating, or creating links.' \
+            'Requires Node >=22.19.0. Older managed Pi is updated to >=1.2.0.' \
+            'Existing package pins and occupied launcher paths are never replaced.'
+        exit 0 ;;
+    --check) check=true ;;
+    '') ;;
+    *) printf 'gentle-shell: unknown option: %s\n' "$1" >&2; exit 2 ;;
+esac
+root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+wrapper="$root/tools/gentle-shell/gentle-shell"
+dest="$HOME/.local/bin/gentle-shell"
+# Check collisions before invoking anything that could update a package.
+if [[ -e "$dest" || -L "$dest" ]]; then
+    if [[ ! -L "$dest" || $(readlink "$dest") != "$wrapper" ]]; then
+        printf 'gentle-shell: refusing to replace %s\n' "$dest" >&2
+        exit 1
+    fi
+fi
+node_bin="$HOME/.local/share/fnm/aliases/default/bin"
+[[ ! -x "$node_bin/node" ]] || export PATH="$node_bin:$PATH"
+if ! command -v node >/dev/null 2>&1 || ! node -e '
+const [a,b] = process.versions.node.split(".").map(Number);
+process.exit(a > 22 || a === 22 && b >= 19 ? 0 : 1);'; then
+    printf 'gentle-shell: Node >=22.19.0 required; restore Node first\n' >&2
+    exit 1
+fi
+pi_home=${GENTLE_SHELL_USER_PI_HOME:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}
+pi=${GENTLE_SHELL_PI:-$pi_home/bin/pi}
+if [[ ! -x "$pi" ]]; then
+    if [[ -n ${GENTLE_SHELL_PI:-} ]]; then
+        printf 'gentle-shell: explicit Pi executable missing: %s\n' "$pi" >&2
+        exit 1
+    fi
+    pi=$(command -v pi) || { printf 'gentle-shell: Pi missing; run dot self install first\n' >&2; exit 1; }
+fi
+export GENTLE_SHELL_PI="$pi" PI_CODING_AGENT_DIR="$pi_home"
+cd "$HOME" # Never let the invoking project's local settings affect migration.
+launcher="$pi_home/npm/node_modules/gentle-pi/bin/gentle-shell.mjs"
+if [[ ! -f "$launcher" ]] && ! $check; then
+    # Validate configuration before any updates; never replace intentional pins.
+    node -e 'const fs = require("fs"), path = process.argv[1];
+try {
+ const packages = fs.existsSync(path) ? JSON.parse(fs.readFileSync(path, "utf8")).packages || [] : [];
+ const sources = packages.map(p => typeof p === "string" ? p : p.source || "");
+ if (sources.some(s => s.startsWith("npm:gentle-pi@") && s !== "npm:gentle-pi@latest")) {
+  console.error("gentle-shell: pinned gentle-pi lacks launcher; review its pin before upgrading"); process.exit(1);
+ }
+} catch {
+ console.error("gentle-shell: invalid Pi package settings; inspect settings.json before migrating"); process.exit(1);
+}' "$pi_home/settings.json"
+fi
+core_ready() {
+    local version
+    version=$("$pi" --version) || return $?
+    node -e 'const m = process.argv[1].trim().match(/^(?:pi\s+)?(\d+)\.(\d+)\.(\d+)$/);
+process.exit(m && (+m[1] > 1 || +m[1] === 1 && +m[2] >= 2) ? 0 : 1);' "$version"
+}
+if ! core_ready; then
+    if $check; then
+        printf 'gentle-shell: Pi >=1.2.0 required; run pi update, then scripts/restore-gentle-shell\n' >&2
+        exit 1
+    fi
+    "$pi" update
+    core_ready || { printf 'gentle-shell: Pi upgrade did not provide >=1.2.0\n' >&2; exit 1; }
+fi
+if [[ ! -f "$launcher" ]]; then
+    if $check; then
+        printf 'gentle-shell: launcher missing: %s; run scripts/restore-gentle-shell\n' "$launcher" >&2
+        exit 1
+    fi
+    "$pi" install npm:gentle-pi@latest
+fi
+"$wrapper" --version >/dev/null
+if $check; then
+    [[ -L "$dest" ]] || { printf 'gentle-shell: local link missing; run scripts/restore-gentle-shell\n' >&2; exit 1; }
+else
+    mkdir -p "$HOME/.local/bin"
+    [[ -L "$dest" ]] || ln -s "$wrapper" "$dest"
+fi
+printf 'Gentle Shell ready: %s (linked Pi home).\n' "$dest"

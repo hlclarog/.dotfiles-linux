@@ -173,6 +173,36 @@ shell inside Herdr. Absent Herdr or unavailable status is ignored.
 `os/linux/gentle-ai/state.json`, reinstalls stale herdr and Moshi hooks, and
 repairs anything the repository changed since the last run.
 
+## Gentle Shell on new and existing VMs
+
+New VMs get the `gentle-shell` command automatically during `dot self install`,
+through `08-shell.sh` after Pi restoration. On an existing VM, after downloading
+these dotfiles, run only the targeted migration:
+
+```bash
+~/.dotfiles/scripts/restore-gentle-shell
+~/.dotfiles/scripts/restore-gentle-shell --check   # read-only readiness check
+gentle-shell --version
+gentle-shell                                    # start in your project
+```
+
+The dotfiles wrapper defaults to `--link`: it reuses your Pi sign-ins, sessions,
+models and `~/.pi/gentle-ai` profiles. No second global npm installation, isolated
+home setup, or credential copying is needed. Requirements are Node >=22.19.0,
+Pi >=1.2.0 and an installed `gentle-pi` launcher. Migration updates an older
+managed Pi and installs `npm:gentle-pi@latest` only when its launcher is missing;
+a populated launcher is reused. Intentional npm package pins and an occupied
+`~/.local/bin/gentle-shell` are rejected rather than overwritten. Rerunning is
+safe. `--check` never installs, updates, or creates links.
+
+The wrapper prefers fnm's default Node and your managed Pi; an explicit
+`GENTLE_SHELL_PI` is respected. Launcher home flags (`--link`, `--isolated`,
+`--home`) still work. Native `home`, `upgrade` and `self-uninstall` commands pass
+through unchanged; do not use `upgrade`/`self-uninstall` for this Pi-managed
+installation. Keep using `upall` or `pi update --extensions` for updates.
+The command must be on PATH (`~/.local/bin`, already in these dotfiles).
+Restart Pi yourself after package updates; migration never closes your sessions.
+
 ## Pi model profiles
 
 Switch in Pi with `/gentle:profiles`. A fresh restore installs all six and
