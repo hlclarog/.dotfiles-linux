@@ -2050,6 +2050,7 @@ expected_order="04-brew-packages.sh
 06-gentle-ai-state.sh
 07-node.sh
 08-pi.sh
+08-shell.sh
 09-gentle-ai-sync.sh
 10-moshi-remote.sh
 11-codegraph.sh

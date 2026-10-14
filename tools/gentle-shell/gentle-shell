@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Reuse Pi's installed Gentle Shell, linked to the user's existing agent home.
+set -euo pipefail
+pi_home=${GENTLE_SHELL_USER_PI_HOME:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}
+launcher="$pi_home/npm/node_modules/gentle-pi/bin/gentle-shell.mjs"
+if [[ ! -f "$launcher" ]]; then
+    printf 'gentle-shell: launcher missing: %s; run scripts/restore-gentle-shell\n' "$launcher" >&2
+    exit 127
+fi
+# A stable fnm default avoids stale project/per-process Node selections.
+node_bin="$HOME/.local/share/fnm/aliases/default/bin"
+[[ ! -x "$node_bin/node" ]] || export PATH="$node_bin:$PATH"
+if ! command -v node >/dev/null 2>&1; then
+    printf 'gentle-shell: Node >=22.19.0 required; restore Node first\n' >&2
+    exit 127
+fi
+if [[ -z ${GENTLE_SHELL_PI:-} && -x "$pi_home/bin/pi" ]]; then
+    export GENTLE_SHELL_PI="$pi_home/bin/pi"
+fi
+# Native special commands must stay first. Explicit home flags override our
+# default; tokens after -- belong to Pi, not to the launcher.
+link=(--link)
+case "${1:-}" in home|upgrade|self-uninstall) link=() ;; esac
+for arg in "$@"; do
+    case "$arg" in
+        --) break ;;
+        --link|--isolated|--home|--home=*) link=(); break ;;
+    esac
+done
+exec node "$launcher" "${link[@]}" "$@"
