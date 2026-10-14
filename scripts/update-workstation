@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# Update installed packages and Pi, then reapply the local Claude bridge workaround.
+# Update installed packages and Pi, reapply the local Claude bridge workaround,
+# then refresh Herdr's agent integrations (and moshi-hook after them).
 set -euo pipefail
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+repo_dir=$(cd "$script_dir/.." && pwd)
 
 run_stage() {
     local label=$1 status
@@ -51,4 +53,10 @@ run_stage 'Pi core' pi update || exit $?
 run_stage 'Pi extensions' pi update --extensions || exit $?
 run_stage 'Pi model catalog' pi update --models || exit $?
 run_stage 'Claude bridge 1M patch' "$script_dir/patch-pi-claude-bridge-1m" || exit $?
+# Last, because any agent-tool upgrade above can leave Herdr's integrations
+# outdated. The script is written to be sourced (it returns early when Herdr is
+# absent), so source it in a child Bash rather than executing it.
+# shellcheck disable=SC2016 # $1 expands in the child Bash, not here.
+run_stage 'Agent integrations' bash -c '. "$1"' agent-integrations \
+    "$repo_dir/restoration_scripts/12-agent-integrations.sh" || exit $?
 printf 'Workstation update complete.\n'

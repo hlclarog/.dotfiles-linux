@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Mock all update commands in-process; never touch an installed package or Pi.
 # Dynamic source paths and function calls are intentional in this isolated test.
-# shellcheck disable=SC1091,SC2329
+# SC2016: '. "$1"' is the literal child-Bash script upall passes.
+# shellcheck disable=SC1091,SC2329,SC2016
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SCRIPT="$ROOT/scripts/update-workstation"
 PATCH="$ROOT/scripts/patch-pi-claude-bridge-1m"
+INTEGRATIONS="$ROOT/restoration_scripts/12-agent-integrations.sh"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
@@ -21,7 +23,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # A path-named Bash function intercepts the patch invocation, even though the
 # production script uses an absolute path. No fake executable or live HOME needed.
 run_case() (
-    local failure=$1 cwd=$2 herdr_case=${3:-absent} safe_patch
+    local failure=$1 cwd=$2 herdr_case=${3:-absent} safe_patch safe_integrations
     cd "$cwd"
     command() {
         if [[ "$1" == -v && "$2" == herdr ]]; then
@@ -77,9 +79,20 @@ run_case() (
         printf 'call:patch %s\n' "$*"
         [[ "$failure" != patch ]]
     }
+    # The integrations script returns early when Herdr is absent, so it must be
+    # sourced in a child Bash; only that exact invocation is accepted.
+    bash() {
+        [[ $# == 4 && "$1" == -c && "$2" == '. "$1"' && "$3" == agent-integrations ]] ||
+            fail "unexpected bash call: $*"
+        printf 'call:agent-integrations %s\n' "$4"
+        [[ "$failure" != integrations ]]
+    }
     git() { fail 'updater must not run git'; }
     printf -v safe_patch '%q' "$PATCH"
     eval "function $safe_patch() { patch_mock \"\$@\"; }"
+    # Executing the integrations script directly must never reach the real one.
+    printf -v safe_integrations '%q' "$INTEGRATIONS"
+    eval "function $safe_integrations() { fail 'integrations must be sourced in a child Bash'; }"
     # Source into this subshell so the path-named patch function can intercept
     # execution without creating files or invoking the real patch.
     # shellcheck source=../../scripts/update-workstation
@@ -92,6 +105,7 @@ expected=(
     'stage:Pi extensions' 'call:pi update --extensions'
     'stage:Pi model catalog' 'call:pi update --models'
     'stage:Claude bridge 1M patch' 'call:patch '
+    'stage:Agent integrations' "call:agent-integrations $INTEGRATIONS"
     'Workstation update complete.'
 )
 
@@ -108,6 +122,7 @@ check_case() {
             extensions) count=6; [[ "$status" == 17 ]] || fail "extensions exited $status" ;;
             models) count=8; [[ "$status" == 17 ]] || fail "models exited $status" ;;
             patch) count=10; [[ "$status" == 1 ]] || fail "patch exited $status" ;;
+            integrations) count=12; [[ "$status" == 1 ]] || fail "integrations exited $status" ;;
         esac
         [[ "$output" == *"failed"* ]] || fail "$failure did not report failure: $output"
         [[ "$output" != *'Workstation update complete.'* ]] || fail "$failure claimed success"
@@ -127,7 +142,7 @@ check_case() {
 }
 
 check_case none /  # resolved patch path must not depend on the current directory
-for failure in dot core extensions models patch; do
+for failure in dot core extensions models patch integrations; do
     check_case "$failure" /
 done
 
@@ -150,4 +165,20 @@ check_herdr_case() {
 for herdr_case in mismatch mismatch_capitalized match absent failed failed_cli stopped malformed unmanaged; do
     check_herdr_case "$herdr_case"
 done
+
+# The real integrations script, sourced the way upall runs it, with Herdr absent:
+# its top-level `return` must end it cleanly instead of falling through to the
+# install loop. Isolated HOME and a PATH without Herdr, Codex or moshi-hook.
+(
+    [[ -x "$INTEGRATIONS" ]] || fail 'integrations script must exist'
+    tmp_home=$(mktemp -d)
+    trap 'rm -rf -- "$tmp_home"' EXIT
+    status=0
+    output=$(env -i HOME="$tmp_home" PATH=/usr/bin:/bin \
+        bash -c '. "$1"' agent-integrations "$INTEGRATIONS" 2>&1) || status=$?
+    [[ "$status" == 0 ]] || fail "integrations without Herdr exited $status: $output"
+    [[ "$output" == ' > herdr is not installed; skipping agent integrations' ]] ||
+        fail "integrations without Herdr: unexpected output: $output"
+    [[ -z "$(ls -A "$tmp_home")" ]] || fail 'integrations without Herdr wrote into HOME'
+)
 printf 'update-workstation mock tests passed\n'
