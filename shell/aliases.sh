@@ -61,6 +61,13 @@ alias up='dot package update_all'
 alias upall='$DOTFILES_PATH/scripts/update-workstation'
 
 # ------------------------------------------------------------------------------
+# Pi
+#
+# gs is already git status, so gentle-shell gets pigs.
+# ------------------------------------------------------------------------------
+alias pigs='gentle-shell'
+
+# ------------------------------------------------------------------------------
 # Projects
 # ------------------------------------------------------------------------------
 alias cdp='cd $HOME/Projects && la'
