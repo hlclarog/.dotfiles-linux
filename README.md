@@ -153,7 +153,7 @@ dot self install                                     # re-run every restoration 
 ~/.dotfiles/scripts/post-restore-secrets --check     # anything left to do by hand
 ~/.dotfiles/scripts/bootstrap-linux --check          # Linux servers: system-level settings
 up                                                   # update every package manager (brew, npm, cargo...)
-upall                                                # packages, Pi core/extensions/models, then local bridge patch
+upall                                                # packages, Pi core/extensions/models, local bridge patch, agent integrations
 ```
 
 `upall` runs updates serially and stops at the first failure; it does not pull
@@ -166,7 +166,11 @@ older servers running to preserve pane processes; the warning does not stop or
 restart anything. If you choose to reconnect, first stop all agents, then run
 `herdr server stop` and `herdr` as separate commands from a terminal outside
 Herdr: stopping the server terminates pane processes, including an invoking
-shell inside Herdr. Absent Herdr or unavailable status is ignored.
+shell inside Herdr. Absent Herdr or unavailable status is ignored. Last,
+`upall` reruns `restoration_scripts/12-agent-integrations.sh`, which brings
+Herdr's integrations up to date for the agents installed on the machine and
+then reinstalls moshi-hook's hooks, because any agent-tool upgrade can leave
+them outdated without warning.
 `up` remains the package-manager-only shortcut.
 
 `dot self install` also regenerates the agent assets from
