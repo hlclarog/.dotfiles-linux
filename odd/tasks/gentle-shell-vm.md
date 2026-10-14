@@ -12,7 +12,7 @@ S5. "Sí, commits locales por unidad de trabajo" — "Conservar implementación,
 ## Tasks
 T1 | S1-S5 | inline (one cohesive launcher/migration unit) | done | implementation `09276a1ca5bffb5a9d0862cdd30df0377184bb52`; verified correction `a034f6981092dbf516c2d89ade46aac1a2938c14`.
 T2 | S2-S5 | inline | done | rollout and preservation evidence: commit `d213a6df173740eef542cd377aad9f9a866b5ccb`.
-T3 | S1-S5 | independent gentle-ai-verify (risk item 5), parent native assessment | in_progress | independent S1-S5 met; native review approved and acknowledged; closure evidence commit pending.
+T3 | S1-S5 | independent gentle-ai-verify (risk item 5), parent native assessment | done | S1-S5 met; native review approved/acknowledged; closure evidence commit `f3de03c6627521fdbe481b471eed6d5b81de4846`.
 
 ## Log
 L1. Original implementation request: "que de estos comandos puedes ejecutar por mi. y dejar listo para ejecutar para mis otras vm recuerda que tengo que aplicar este cambio para mis nuevas vm y mis antiguas".
