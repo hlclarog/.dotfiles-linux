@@ -1251,6 +1251,25 @@ install_calls=$(grep '^pi install ' "$PI_LOG")
 expected_installs=$(jq -r '.packages[] | "pi install " + .' "$DOTFILES_PATH/config/pi/agent/settings.json")
 check "case a: pi install runs once per package with the exact sources" "$expected_installs" "$install_calls"
 
+# `pi update --extensions` (upall) skips exact-version specs, so a pinned seed
+# never updates: gentle-engram@0.1.8 outlived the Engram 3.x server it needed.
+# Pi pins an npm source when semver.valid() accepts the text after the name in
+# its trimmed spec: an optional `v`, X.Y.Z, then optional -prerelease/+build.
+pi_pinned_filter='
+def trim: gsub("^\\s+|\\s+$"; "");
+def exact: test("^v?(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$");
+.packages[] | (if type == "string" then . else (.source // "") end)
+| select(startswith("npm:"))
+| select((.[4:] | trim | capture("^@?[^@]+(?:/[^@]+)?@(?<v>.+)$") | .v | trim | exact) // false)'
+pinned_seeds=$(jq -r "$pi_pinned_filter" "$DOTFILES_PATH/config/pi/agent/settings.json")
+check "seeded settings.json pins no package to an exact version" "" "$pinned_seeds"
+
+# The guard must follow Pi's rule, or a pin could slip past it.
+pin_fixture="$SANDBOX/pin-fixture.json"
+printf '%s\n' '{"packages":["npm:x@0.1.8","npm:@s/x@1.2.3","npm:x@1.2.3-beta.1","npm:x@v1.2.3",{"source":"npm:y@2.0.0"},"npm:x","npm:x@latest","npm:@s/x","npm:x@^1.2.3","npm:x@1.2"]}' >"$pin_fixture"
+pinned_fixture=$(jq -r "$pi_pinned_filter" "$pin_fixture" | paste -sd' ' -)
+check "pin guard flags exact versions only" "npm:x@0.1.8 npm:@s/x@1.2.3 npm:x@1.2.3-beta.1 npm:x@v1.2.3 npm:y@2.0.0" "$pinned_fixture"
+
 assets_line=$(grep -n '^pi -p /gentle:install-delegation$' "$PI_LOG" | head -n1 | cut -d: -f1)
 last_install_line=$(grep -n '^pi install ' "$PI_LOG" | tail -n1 | cut -d: -f1)
 if [ -n "$assets_line" ] && [ -n "$last_install_line" ] && [ "$assets_line" -gt "$last_install_line" ]; then

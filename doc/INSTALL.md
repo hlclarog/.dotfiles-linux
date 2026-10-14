@@ -204,9 +204,9 @@ PATH, or dropped entirely (falling back to the SDK's own lookup) when no
 over from an earlier restore, not just a freshly seeded one. Script 08 then
 builds `~/.pi/gentle-ai/profiles.json` with all six saved profiles, grouped
 by provider and then by tier (`claude-low`, `claude-medium`, `claude-high`,
-`codex-low`, `codex-medium`, `codex-high`) with `claude-medium` active, installs every package pinned in the seeded
+`codex-low`, `codex-medium`, `codex-high`) with `claude-medium` active, installs every package listed in the seeded
 `settings.json` with `pi install <source>` -- `pi update --extensions`
-silently skips pinned specs such as `npm:gentle-engram@0.1.8`, so each package
+silently skips pinned specs (`npm:<package>@<version>`), so each package
 is installed explicitly instead -- and finally runs one `pi -p
 "/gentle:install-delegation"` session: since gentle-pi 4.0.0, session_start
 installs the delegation and review agents and then applies the saved models

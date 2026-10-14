@@ -6,7 +6,7 @@
   "lastChangelogVersion": "0.87.1",
   "packages": [
     "npm:gentle-pi@latest",
-    "npm:gentle-engram@0.1.8",
+    "npm:gentle-engram",
     "npm:pi-claude-bridge",
     "npm:pi-mcp-adapter"
   ],
