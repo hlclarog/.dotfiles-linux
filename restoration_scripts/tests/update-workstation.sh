@@ -23,7 +23,7 @@ fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 # A path-named Bash function intercepts the patch invocation, even though the
 # production script uses an absolute path. No fake executable or live HOME needed.
 run_case() (
-    local failure=$1 cwd=$2 herdr_case=${3:-absent} safe_patch
+    local failure=$1 cwd=$2 herdr_case=${3:-absent} safe_patch safe_integrations
     cd "$cwd"
     command() {
         if [[ "$1" == -v && "$2" == herdr ]]; then
@@ -90,6 +90,9 @@ run_case() (
     git() { fail 'updater must not run git'; }
     printf -v safe_patch '%q' "$PATCH"
     eval "function $safe_patch() { patch_mock \"\$@\"; }"
+    # Executing the integrations script directly must never reach the real one.
+    printf -v safe_integrations '%q' "$INTEGRATIONS"
+    eval "function $safe_integrations() { fail 'integrations must be sourced in a child Bash'; }"
     # Source into this subshell so the path-named patch function can intercept
     # execution without creating files or invoking the real patch.
     # shellcheck source=../../scripts/update-workstation
