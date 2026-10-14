@@ -10,9 +10,9 @@ S4. "Sí, dejar gentle-shell disponible en la terminal" — "Crear el enlace nec
 S5. "Sí, commits locales por unidad de trabajo" — "Conservar implementación, pruebas y documentación en una rama recuperable; no publicar nada." Check: local work-unit commits on feature branch, no push/PR.
 
 ## Tasks
-T1 | S1-S5 | inline (one cohesive launcher/migration unit) | done | implementation + tests + docs: commit `09276a1ca5bffb5a9d0862cdd30df0377184bb52`.
-T2 | S2-S5 | inline | in_progress | applied successfully, version/readiness and preservation observed; rollout-evidence commit pending.
-T3 | S1-S5 | independent gentle-ai-verify (risk item 5), parent native assessment | pending | evidence/closure commit pending.
+T1 | S1-S5 | inline (one cohesive launcher/migration unit) | in_progress | previous commit `09276a1ca5bffb5a9d0862cdd30df0377184bb52`; reopened for executable restoration step and strict help-argument validation.
+T2 | S2-S5 | inline | done | rollout and preservation evidence: commit `d213a6df173740eef542cd377aad9f9a866b5ccb`.
+T3 | S1-S5 | independent gentle-ai-verify (risk item 5), parent native assessment | pending | independent run found two T1 blockers; targeted correction recheck and native review pending.
 
 ## Log
 L1. Original implementation request: "que de estos comandos puedes ejecutar por mi. y dejar listo para ejecutar para mis otras vm recuerda que tengo que aplicar este cambio para mis nuevas vm y mis antiguas".
@@ -24,3 +24,5 @@ L6. T1 RED: isolated suite failed for missing wrapper (exit 1). GREEN: public wr
 L7. T1 committed as 09276a1 (354 insertions, including tracker). Authoritative local tracker is updated; mem_update failed on provider expected_project validation, so mirror is refreshed with mem_save and explicit project. T2 starts with package reuse, protected-file snapshot and version-only probes; no session is started or restarted.
 L8. T2 live job-5 exit 0 (7s): migration and --check succeeded; gentle-shell 4.2.0, pi 1.2.0, home link /home/hclaro/.pi/agent. Link: ~/.local/bin/gentle-shell -> tools/gentle-shell/gentle-shell in this checkout. Eleven protected file entries unchanged; no new session files. No global install or configuration regeneration required.
 L9. Native ASSESS over committed T1 (base 3e9611c, HEAD 09276a1) returned high/nativeRisk high, writerProfile large, independentVerifier true, RDD on and reviewDue true. No native START yet; independent verification runs before review.
+L10. Independent verify mv7l440x-4-w6p8: S2-S5 met, S1 unmet. Blockers: 08-shell.sh mode100644 fails Dotly executable discovery; --help/-h accepts extra arguments before count validation. Correction batch reopens T1; reverify is limited to these blockers. Verifier ShellCheck command exceeded shared 30s timeout and is unavailable (no retry); parent ShellCheck already passed. Verifier used /tmp/gentle-shell-verify.BWPj9p instead of requested in-project scratch, left cleanup pending and made no production edits; do not read or delete outside authorized paths without permission.
+L11. Correction RED observed (mode test exit1; help with extra input incorrectly exit0). Applied chmod +x to 08-shell.sh and moved argument-count guard before help dispatch; added regression assertions. Corrected focused suite, bash -n, parent ShellCheck, git diff --check and live readiness --check all exit0. No timeout retry or another full independent sweep; two-blocker recheck pending.

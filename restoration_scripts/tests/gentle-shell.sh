@@ -55,6 +55,16 @@ check_preserved() {
     expected=$(printf '%s\n' "$before" | grep -v '/bin/')
     assert "$expected" "$after"
 }
+# S1: Dotly requires the step to be executable before sourcing it.
+[[ -x "$ROOT/restoration_scripts/08-shell.sh" ]] || fail '08-shell.sh must be executable for Dotly'
+for args in '--help --bogus' '-h unrequested-value'; do
+    read -r -a help_args <<< "$args"
+    run bash "$RESTORE" "${help_args[@]}"
+    assert 2 "$status"; assert '' "$out"
+    assert 'gentle-shell: expected at most one option' "$err"
+    assert '' "$(<"$GENTLE_SHELL_TEST_LOG")"
+    check_preserved
+done
 # S2: missing package is actionable, no implicit installation during launch.
 run bash "$WRAPPER" --version
 assert 127 "$status"; assert '' "$out"

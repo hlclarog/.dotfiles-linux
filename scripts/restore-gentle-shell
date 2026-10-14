@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Explicit migration for existing VMs; also called after fresh Pi restoration.
 set -euo pipefail
+[[ $# -le 1 ]] || { printf 'gentle-shell: expected at most one option\n' >&2; exit 2; }
 check=false
 case "${1:-}" in
     --help|-h)
@@ -14,7 +15,6 @@ case "${1:-}" in
     '') ;;
     *) printf 'gentle-shell: unknown option: %s\n' "$1" >&2; exit 2 ;;
 esac
-[[ $# -le 1 ]] || { printf 'gentle-shell: expected at most one option\n' >&2; exit 2; }
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 wrapper="$root/tools/gentle-shell/gentle-shell"
 dest="$HOME/.local/bin/gentle-shell"
