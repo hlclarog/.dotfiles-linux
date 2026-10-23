@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Run the Windows ego lite CLI (ego-browser.exe) from WSL.
+#
+# ego lite has no Linux build. Its CLI lives in a versioned directory that
+# changes on every upgrade, and this WSL does not append the Windows PATH, so
+# the agent skill's plain `ego-browser` call would not resolve. This wrapper
+# picks the newest installed version and forwards arguments and stdin, so the
+# documented heredoc form (`ego-browser nodejs <<'EOF'`) works unchanged.
+#
+# ego lite refuses connections from an elevated process. A Windows process
+# started from WSL gets the token of the wsl.exe that owns its interop socket.
+# SSH sessions (herdr, Pi) have no socket of their own and fall back to the
+# distro's boot session, which the S4U boot task starts with a full admin
+# token. So when the inherited socket is elevated, switch to one owned by a
+# non-elevated wsl.exe (a terminal tab, Docker Desktop's proxy).
+set -euo pipefail
+# The same links land on Linux VMs, where no Windows host is reachable.
+if [[ ! -e /proc/sys/fs/binfmt_misc/WSLInterop ]]; then
+    printf '%s\n' 'ego-browser: ego lite runs only on Windows; this machine is not WSL with interop enabled.' >&2
+    exit 127
+fi
+whoami_exe=/mnt/c/Windows/System32/whoami.exe
+elevated() { # $1: interop socket, or empty for the inherited one
+    local groups
+    # </dev/null: interop forwards stdin, so whoami.exe would swallow the
+    # caller's heredoc script before ego-browser.exe could read it.
+    groups=$(WSL_INTEROP=${1:-${WSL_INTEROP:-}} "$whoami_exe" /groups </dev/null 2>/dev/null) || return 2
+    [[ $groups == *S-1-16-12288* ]]
+}
+if [[ -z ${EGO_BROWSER_KEEP_INTEROP:-} && -x $whoami_exe ]] && elevated ""; then
+    unelevated=""
+    for socket in /run/WSL/*_interop; do
+        [[ -S $socket ]] || continue
+        if elevated "$socket"; then continue; elif [[ $? -eq 1 ]]; then unelevated=$socket; break; fi
+    done
+    if [[ -z $unelevated ]]; then
+        printf '%s\n' 'ego-browser: every WSL interop session is elevated, and ego lite rejects elevated callers.' \
+            'Open a WSL tab from a Windows Terminal profile that is not run as administrator, then retry.' >&2
+        exit 1
+    fi
+    export WSL_INTEROP=$unelevated
+fi
+app_dir=${EGO_LITE_APP_DIR:-"/mnt/c/Program Files/Citro Labs/ego lite/Application"}
+exe=""
+if [[ -d "$app_dir" ]]; then
+    version=$(find "$app_dir" -mindepth 2 -maxdepth 2 -name ego-browser.exe -printf '%h\n' \
+        | xargs -r -d '\n' -n1 basename | sort -V | tail -n1)
+    [[ -z "$version" ]] || exe="$app_dir/$version/ego-browser.exe"
+fi
+if [[ -z "$exe" ]]; then
+    printf 'ego-browser: ego-browser.exe not found under %s; install ego lite from https://lite.ego.app/\n' "$app_dir" >&2
+    exit 127
+fi
+exec "$exe" "$@"

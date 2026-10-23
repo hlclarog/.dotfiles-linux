@@ -40,5 +40,9 @@
     ~/.local/bin/codegraph: tools/codegraph/codegraph
     # Shared by the Claude Code and Codex SessionStart hooks.
     ~/.local/bin/codegraph-session-reminder: tools/codegraph/codegraph-session-reminder
+    # ego lite is a Windows-only agent browser; the wrapper finds its versioned
+    # CLI and the skill teaches Pi the WSL path and networking rules.
+    ~/.local/bin/ego-browser: tools/ego/ego-browser
+    ~/.pi/agent/skills/ego-browser: tools/ego/skill
     # opencode has no session-hook file, so the same reminder arrives as a plugin.
     ~/.config/opencode/plugins/codegraph-index-reminder.ts: tools/codegraph/codegraph-index-reminder.ts
