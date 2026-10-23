@@ -208,6 +208,23 @@ installation. Keep using `upall` or `pi update --extensions` for updates.
 The command must be on PATH (`~/.local/bin`, already in these dotfiles).
 Restart Pi yourself after package updates; migration never closes your sessions.
 
+## ego lite browser on WSL
+
+[ego lite](https://lite.ego.app/) is a Windows-only Chromium browser for
+agents. On WSL, `dot self install` links `~/.local/bin/ego-browser`, a wrapper
+around the newest installed `ego-browser.exe`, and the `ego-browser` Pi skill,
+which teaches agents the WSL rules (Windows paths for script files, WSL dev
+servers reachable as `localhost`). Install ego lite on Windows and finish its
+onboarding once, then check with `ego-browser --version`.
+
+ego lite rejects elevated callers. SSH sessions (herdr, Pi) inherit the distro's
+boot session, which the S4U keepalive task starts with a full admin token, so
+the wrapper switches to a non-elevated WSL interop session (a terminal tab,
+Docker Desktop's proxy). If none exists it says so: open one WSL tab from a
+non-elevated Windows Terminal profile. `EGO_BROWSER_KEEP_INTEROP=1` disables the
+switch; `EGO_LITE_APP_DIR` overrides the install directory. There is no Linux
+build, so Linux VMs need a headless browser instead.
+
 ## Pi model profiles
 
 Switch in Pi with `/gentle:profiles`. A fresh restore installs all six and
