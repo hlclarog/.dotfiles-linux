@@ -56,7 +56,7 @@
   "claude-medium": {
     "orchestrator": {
       "model": "claude-bridge/claude-opus-5-5",
-      "thinking": "high"
+      "thinking": "max"
     },
     "jd-judge-a": {
       "model": "claude-bridge/claude-opus-5-5",

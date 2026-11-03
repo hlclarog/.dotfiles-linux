@@ -392,6 +392,14 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(list(self.profiles["codex-high"].keys()), CANONICAL_ORDER)
         self.assertEqual(self.profiles["codex-high"], expected_codex_high)
 
+    def test_claude_medium_orchestrator_uses_max_effort(self):
+        self.assertEqual(self.profiles["claude-medium"]["orchestrator"], {
+            "model": "claude-bridge/claude-opus-5-5", "thinking": "max",
+        })
+        self.assertEqual(self.profiles["claude-low"]["orchestrator"], {
+            "model": "claude-bridge/claude-opus-5-5", "thinking": "high",
+        })
+
     def test_medium_low_codex_profiles_route_cheap_roles_to_terra(self):
         astra = "openai-codex/gpt-6-astra"
         sol = "openai-codex/gpt-6.1-sol"
@@ -406,9 +414,9 @@ class RestoreTests(unittest.TestCase):
             "review-risk": (sol, "high"), "review-refuter": (sol, "max"),
             "review-validator": (astra, "max"),
         }
-        medium_levels = {role: "medium" for role in ("orchestrator", "review-readability", "review-resilience")}
+        medium_levels = {role: "medium" for role in ("review-readability", "review-resilience")}
         expected_low = {
-            role: (luna if role == "gentle-ai-explore" else terra, medium_levels.get(role, "high"))
+            role: (luna if role == "gentle-ai-explore" else terra, "max" if role == "orchestrator" else medium_levels.get(role, "high"))
             for role in CANONICAL_ORDER
         }
         for name, expected in (("codex-medium", expected_medium), ("codex-low", expected_low)):
