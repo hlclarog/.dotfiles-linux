@@ -9,7 +9,7 @@ import stat
 import sys
 import tempfile
 
-NAMES = ("codex-low", "codex-medium", "codex-high", "claude-high")
+NAMES = ("codex-low", "codex-medium", "codex-high", "claude-low", "claude-medium", "claude-high")
 # The profile activated when no registry exists yet.
 ACTIVE = "codex-medium"
 # gentle-pi 4.0.0 retired the sdd-* agents; these are the roles it still routes,
@@ -29,6 +29,8 @@ SOURCES = {
     "codex-medium": (SOURCE_DIR / "codex-medium.json", "openai-codex/", None),
     "codex-low": (SOURCE_DIR / "codex-low.json", "openai-codex/", None),
     "codex-high": (SOURCE_DIR / "codex-high.json", "openai-codex/", None),
+    "claude-low": (SOURCE_DIR / "claude-profiles.json", "claude-bridge/", "claude-low"),
+    "claude-medium": (SOURCE_DIR / "claude-profiles.json", "claude-bridge/", "claude-medium"),
     "claude-high": (SOURCE_DIR / "claude-profiles.json", "claude-bridge/", "claude-high"),
 }
 TARGET = Path.home() / ".pi/gentle-ai/profiles.json"

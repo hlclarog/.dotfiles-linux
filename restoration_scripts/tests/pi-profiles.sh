@@ -16,7 +16,7 @@ import unittest
 
 SCRIPT = Path(os.environ["RESTORE_SCRIPT"])
 SOURCE_DIR = Path(os.environ["RESTORE_SOURCE_DIR"])
-NAMES = ("codex-low", "codex-medium", "codex-high", "claude-high")
+NAMES = ("codex-low", "codex-medium", "codex-high", "claude-low", "claude-medium", "claude-high")
 # The profile activated when no registry exists yet.
 NAME = "codex-medium"
 # Each entry is (source file, prefix required of every model, key inside that
@@ -25,13 +25,17 @@ SOURCE_FILES = {
     "codex-medium": "codex-medium.json",
     "codex-low": "codex-low.json",
     "codex-high": "codex-high.json",
+    "claude-low": "claude-profiles.json",
+    "claude-medium": "claude-profiles.json",
     "claude-high": "claude-profiles.json",
 }
-SOURCE_KEYS = {"claude-high": "claude-high"}
+SOURCE_KEYS = {name: name for name in ("claude-low", "claude-medium", "claude-high")}
 PREFIXES = {
     "codex-medium": "openai-codex/",
     "codex-low": "openai-codex/",
     "codex-high": "openai-codex/",
+    "claude-low": "claude-bridge/",
+    "claude-medium": "claude-bridge/",
     "claude-high": "claude-bridge/",
 }
 # gentle-pi 4.0.0 retired the sdd-* agents; these are the roles it still routes.
@@ -47,7 +51,11 @@ CODEX_FILES = ["codex-low.json", "codex-medium.json", "codex-high.json"]
 
 def wrap(name, profile):
     key = SOURCE_KEYS.get(name)
-    return {key: profile} if key else profile
+    if key:
+        data = json.loads((SOURCE_DIR / "claude-profiles.json").read_text())
+        data[key] = profile
+        return data
+    return profile
 
 
 def load_profile(source_dir, name):
@@ -121,6 +129,20 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(backups[0].stat().st_mode), 0o600)
         self.assertNotIn("private-live-value", result.stdout + result.stderr)
         self.assert_safe_output(result)
+
+    def test_restores_missing_claude_low_and_medium(self):
+        claude = json.loads((SOURCE_DIR / "claude-profiles.json").read_text())
+        original = self.registry(profiles={"other": {"custom": "untouched"}}, active="other")
+        before = self.seed(original)
+        result = self.run_restore()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        restored = json.loads(self.target.read_text())
+        for name in ("claude-low", "claude-medium"):
+            self.assertEqual(restored["profiles"][name], claude[name])
+        self.assertEqual(restored["profiles"]["other"], original["profiles"]["other"])
+        self.assertEqual(restored["active"], "other")
+        self.assertEqual(len(self.backups()), 1)
+        self.assertEqual(self.backups()[0].read_bytes(), before)
 
     def test_identical_profile_is_no_op(self):
         self.seed(self.registry(profiles=self.profiles))
@@ -196,6 +218,8 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(json.loads(self.target.read_text()), {
             **original, "profiles": {**original["profiles"],
                                      "codex-high": self.profiles["codex-high"],
+                                     "claude-low": self.profiles["claude-low"],
+                                     "claude-medium": self.profiles["claude-medium"],
                                      "claude-high": self.profiles["claude-high"]},
         })
         backups = self.backups()
@@ -298,7 +322,8 @@ class RestoreTests(unittest.TestCase):
                             with self.subTest(args=args):
                                 result = self.run_restore(script, *args)
                                 self.assertNotEqual(result.returncode, 0)
-                                self.assertIn(f"Source profile {name} ", result.stderr)
+                                expected_name = "claude-low" if name.startswith("claude-") and bad == "{invalid json" else name
+                                self.assertIn(f"Source profile {expected_name} ", result.stderr)
                                 self.assertEqual(self.target.read_bytes(), before)
                                 self.assertEqual(self.backups(), [])
                                 self.assert_safe_output(result)
