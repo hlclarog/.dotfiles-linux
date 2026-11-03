@@ -257,8 +257,8 @@ activates `claude-medium` the first time it
 installs Pi, so nothing else needs to run for a new machine.
 
 This script instead exists for an **existing** registry that predates that
-restore, or one where `codex-medium`, `codex-low`, `codex-high` or
-`claude-high` is missing or was overwritten. Run it from the dotfiles
+restore, or one where any of the six saved Claude or Codex profiles is
+missing or was overwritten. Run it from the dotfiles
 checkout:
 
 ```bash
@@ -281,10 +281,10 @@ cd "$HOME/.dotfiles"
 ./scripts/restore-pi-profiles --replace
 ```
 
-This replaces only `codex-medium`, `codex-low`, `codex-high` and
-`claude-high` from the trusted repository sources (`config/pi/codex-medium.json`,
-`config/pi/codex-low.json`, `config/pi/codex-high.json` and the `claude-high`
-key of `config/pi/claude-profiles.json`), without changing other profiles or
+This replaces the six saved Codex and Claude profiles from the trusted
+repository sources (`config/pi/codex-medium.json`, `config/pi/codex-low.json`,
+`config/pi/codex-high.json` and `config/pi/claude-profiles.json`), without
+changing other profiles or
 the active selection. Before changing an existing registry, the script saves
 its **exact original bytes** in a private (mode `600`) `profiles.json.backup-*`
 file alongside it. Review the restored profiles and retain the backup until
