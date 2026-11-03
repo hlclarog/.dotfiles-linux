@@ -1,7 +1,7 @@
 {
   "orchestrator": {
     "model": "openai-codex/gpt-6.1-terra",
-    "thinking": "medium"
+    "thinking": "max"
   },
   "jd-judge-a": {
     "model": "openai-codex/gpt-6.1-terra",
