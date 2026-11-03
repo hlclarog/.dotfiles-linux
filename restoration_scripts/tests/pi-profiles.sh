@@ -367,6 +367,33 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(list(self.profiles["codex-high"].keys()), CANONICAL_ORDER)
         self.assertEqual(self.profiles["codex-high"], expected_codex_high)
 
+    def test_medium_low_codex_profiles_route_cheap_roles_to_terra(self):
+        astra = "openai-codex/gpt-6-astra"
+        sol = "openai-codex/gpt-6.1-sol"
+        terra = "openai-codex/gpt-6.1-terra"
+        luna = "openai-codex/gpt-6-luna"
+        expected_medium = {
+            "orchestrator": (sol, "high"), "jd-judge-a": (astra, "max"),
+            "jd-judge-b": (sol, "max"), "jd-fix-agent": (sol, "high"),
+            "gentle-ai-explore": (terra, "high"), "gentle-ai-verify": (sol, "max"),
+            "gentle-ai-worker": (sol, "high"), "review-readability": (terra, "high"),
+            "review-reliability": (sol, "high"), "review-resilience": (terra, "high"),
+            "review-risk": (sol, "high"), "review-refuter": (sol, "max"),
+            "review-validator": (astra, "max"),
+        }
+        medium_levels = {role: "medium" for role in ("orchestrator", "review-readability", "review-resilience")}
+        expected_low = {
+            role: (luna if role == "gentle-ai-explore" else terra, medium_levels.get(role, "high"))
+            for role in CANONICAL_ORDER
+        }
+        for name, expected in (("codex-medium", expected_medium), ("codex-low", expected_low)):
+            with self.subTest(profile=name):
+                self.assertEqual(list(self.profiles[name]), CANONICAL_ORDER)
+                self.assertEqual(self.profiles[name], {
+                    role: {"model": model, "thinking": thinking}
+                    for role, (model, thinking) in expected.items()
+                })
+
     def test_every_saved_profile_has_only_current_roles_in_canonical_order(self):
         claude = json.loads((SOURCE_DIR / "claude-profiles.json").read_text())
         self.assertEqual(list(claude), CLAUDE_ORDER)

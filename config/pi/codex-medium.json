@@ -16,8 +16,8 @@
     "thinking": "high"
   },
   "gentle-ai-explore": {
-    "model": "openai-codex/gpt-6.1-sol",
-    "thinking": "medium"
+    "model": "openai-codex/gpt-6.1-terra",
+    "thinking": "high"
   },
   "gentle-ai-verify": {
     "model": "openai-codex/gpt-6.1-sol",
@@ -28,7 +28,7 @@
     "thinking": "high"
   },
   "review-readability": {
-    "model": "openai-codex/gpt-6.1-sol",
+    "model": "openai-codex/gpt-6.1-terra",
     "thinking": "high"
   },
   "review-reliability": {
@@ -36,7 +36,7 @@
     "thinking": "high"
   },
   "review-resilience": {
-    "model": "openai-codex/gpt-6.1-sol",
+    "model": "openai-codex/gpt-6.1-terra",
     "thinking": "high"
   },
   "review-risk": {
